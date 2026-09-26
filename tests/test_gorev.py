@@ -1364,6 +1364,15 @@ def test_urun_ve_otel_sayfalari_aday_sayilir(url):
     assert gorev.sayfa.aday_sayfalari([{"url": url}]) == {url}
 
 
+def test_arama_motoru_sayfasindaki_not_site_sayilmaz():
+    """Canlı test (asgari ücret): 'iki haber sitesiyle doğrula' denmişti; NTV doğrulaması DuckDuckGo sonuç özetinden
+    alındı ve html.duckduckgo.com ayrı bir site sayıldı."""
+    notlar = [{"url": "https://www.csgb.gov.tr/asgari-ucret/"}, {"url": "https://html.duckduckgo.com/html/?q=asgari"},
+              {"url": "https://www.google.com/search?q=asgari+ucret"}, {"url": "https://www.bing.com/search?q=x"},
+              {"url": "https://www.ntv.com.tr/ekonomi/asgari-ucret"}]
+    assert gorev.sayfa.kaynak_siteleri(notlar) == ["csgb.gov.tr", "ntv.com.tr"]
+
+
 def test_secim_gorevi_olmayan_isleme_kapi_uygulanmaz(sahte, yerel_tarayici_ac, site):
     kayit = {}
     m = sahte([{"eylem": "git", "url": f"{site}/magaza/urun.html?id=2"}, {"eylem": "tikla", "no": None},

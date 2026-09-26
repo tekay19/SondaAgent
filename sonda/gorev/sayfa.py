@@ -3,6 +3,7 @@ import re
 from urllib.parse import urlparse
 
 from .. import koruma
+from ..web import alan_adi
 from . import ayar
 
 
@@ -64,6 +65,11 @@ def arama_sayfasi(url):
     if _ARAMA_MOTORU.search(url) or _ARAMA_YOLU.search(p.path):
         return True
     return p.path in ("", "/") and bool(_ARAMA_SORGUSU.search(p.query))
+
+
+def kaynak_siteleri(notlar):
+    """Not alınan siteler; arama motoru sonuç sayfaları kaynak sayılmaz (özet, sitenin kendisi değildir)."""
+    return sorted({alan_adi(n["url"]) for n in notlar if not _ARAMA_MOTORU.search(n["url"])})
 
 
 def aday_sayfalari(notlar):

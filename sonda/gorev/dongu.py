@@ -14,7 +14,7 @@ from .eylemler import adim, uygula
 from .istem import istem
 from .kayit import GorevKaydi
 from .promptlar import CAPTCHA_SEBEBI, DEVAM_METNI, IKI_ADIM_SEBEBI, IKI_ADIM_TAMAM, SONUC_PROMPTU
-from .sayfa import SayfaHafizasi, aday_uyarisi, eksik_form_alanlari, iki_adim_mi, islem_butonu
+from .sayfa import SayfaHafizasi, aday_uyarisi, eksik_form_alanlari, iki_adim_mi, islem_butonu, kaynak_siteleri
 
 
 class GizliListe(list):
@@ -196,7 +196,7 @@ def dongu(g, gorev_metni, onceki, model, t, durum, derinlik):
             adimlar.append(f"{adim_no}. {e} istedi ama istenen form alanları eksikti{dusunce_ek}")
             continue
         if e == "bitir":
-            siteler = sorted({alan_adi(n["url"]) for n in notlar})
+            siteler = kaynak_siteleri(notlar)
             if len(siteler) < derinlik["min_site"] and bitir_red < ayar.BITIR_RED_SINIRI and adim_no < maks - 3:
                 bitir_red += 1
                 geri_bildirim = (f"Henüz bitirme: bu görev için en az {derinlik['min_site']} farklı siteden bilgi "
