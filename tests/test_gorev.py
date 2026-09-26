@@ -691,6 +691,21 @@ def test_resimli_captcha_kullaniciya_birakilir_ve_otomatik_devam(sahte, yerel_ta
     assert len(kul) == 1 and "robot" in kul[0]["sebep"].lower()
 
 
+def test_dogrulama_cozulmeden_devam_denirse_site_atlanir(sahte, yerel_tarayici_ac, site, monkeypatch):
+    """Canlı test (temiz profil, Teknosa): doğrulama çözülmeden 'devam' denince Sonda 'tamamlandı' sandı, siteyi yeniden
+    açtı ve kullanıcıya tekrar tekrar devretti."""
+    monkeypatch.setattr(gorev.ayar, "IKI_ADIM_KONTROL", 0.3)
+    monkeypatch.setattr(gorev.ayar, "CAPTCHA_BEKLE", 0.5)
+    m = sahte([{"eylem": "git", "url": f"{site}/captcha.html?resimli=1"},
+               {"eylem": "git", "url": f"{site}/captcha.html?resimli=1&sayfa=2"},  # aynı site, başka adres
+               {"eylem": "captcha"}, {"eylem": "bitir", "sonuc": "x"}])
+    o = calistir(yerel_tarayici_ac, komutlar=["devam", "devam", "devam"])
+    assert len([x for x in o if x["tur"] == "kullaniciya"]) == 1
+    assert "hâlâ geçilmedi" in m.istemler[1].split("SON EYLEMİN SONUCU:")[1].split("MEVCUT SAYFA")[0]
+    assert "engelli" in m.istemler[2].split("SON EYLEMİN SONUCU:")[1].split("MEVCUT SAYFA")[0]
+    assert "engelli" in m.istemler[3].split("SON EYLEMİN SONUCU:")[1].split("MEVCUT SAYFA")[0]
+
+
 def test_sistem_promptu_captcha_eylemini_anlatir():
     assert '"captcha"' in gorev.promptlar.SISTEM
 

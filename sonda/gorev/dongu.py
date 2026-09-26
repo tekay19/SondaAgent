@@ -68,6 +68,20 @@ def bak(t, ekran_iste):
     return sayfa, ekran
 
 
+def engel_metni(url):
+    return (f"{alan_adi(url)} robot doğrulamasıyla engelli (kullanıcı doğrulamayı çözmeden geçti). Bu siteyi atla, "
+            "yeniden açma; görevi başka kaynaklarla sürdür ve bu siteye erişilemediğini not al.")
+
+
+def dogrulama_sonrasi(url, sayfa, engelli_siteler):
+    """Kullanıcıya bırakılan doğrulamadan dönüldü: çözüldüyse devam; çözülmeden 'devam' dendiyse site engelli sayılır
+    (yoksa model siteyi yeniden açıp kullanıcıya tekrar tekrar devrediyordu)."""
+    if not sayfa.get("captcha"):
+        return "Robot doğrulaması tamamlandı; kaldığın yerden devam et."
+    engelli_siteler.add(alan_adi(url))
+    return ("Robot doğrulaması hâlâ geçilmedi; kullanıcı çözmeden devam dedi. " + engel_metni(url))
+
+
 def model_gorev_metni(gorev_metni, harita, onceki_gizli=()):
     """Modelin gördüğü görev metni: şifreler yer tutucuyla değişir, gerçek değeri kod yazar. Önceki mesajlarda
     verilmiş şifreler görevde şifre sözcüğü olmadan tekrarlanırsa ••• olur."""
@@ -84,7 +98,7 @@ def dongu(g, gorev_metni, onceki, model, t, durum, derinlik):
     maks = min(ayar.MAKS_ADIM, derinlik["maks_adim"])
     geri_bildirim, ekran_iste, son_imza, tekrar, bitir_red = "", False, None, 0, 0
     yapilan, erken_red, form_red, son_mesaj, islem_red, kontrol_edildi = 0, False, False, "", 0, False
-    captcha_denenen, son_okuma, son_imzalar = set(), None, []
+    captcha_denenen, son_okuma, son_imzalar, engelli_siteler = set(), None, [], set()
     durum["gizli"].update(koruma.gizli_adaylar(gorev_metni))
     kayit = GorevKaydi(g.id, durum["gizli"])
     harita = koruma.yer_tutucular(gorev_metni)
@@ -131,7 +145,9 @@ def dongu(g, gorev_metni, onceki, model, t, durum, derinlik):
                 return
             geri_bildirim, son_imza, tekrar = IKI_ADIM_TAMAM, None, 0
             sayfa, ekran = bak(t, ekran_iste)
-        if sayfa.get("captcha") and t.url not in captcha_denenen:
+        if sayfa.get("captcha") and alan_adi(t.url) in engelli_siteler:
+            geri_bildirim = engel_metni(t.url)  # kullanıcı bu sitedeki doğrulamayı çözmeden geçti: yeniden sorulmaz
+        elif sayfa.get("captcha") and t.url not in captcha_denenen:
             # Kullanıcı izni: robot doğrulamasının onay kutusu modele sorulmadan işaretlenir; yetmezse kullanıcıya
             captcha_denenen.add(t.url)
             onaylandi = t.captcha_onayla()
@@ -147,8 +163,8 @@ def dongu(g, gorev_metni, onceki, model, t, durum, derinlik):
                                     else "Robot doğrulaması 15 dakika içinde yapılmadığı için görev bitti.")
                     durum["kod"] = "durduruldu" if komut == "durdur" else "zaman_asimi"
                     return
-                geri_bildirim = "Robot doğrulaması tamamlandı; kaldığın yerden devam et."
                 sayfa, ekran = bak(t, ekran_iste)
+                geri_bildirim = dogrulama_sonrasi(t.url, sayfa, engelli_siteler)
         hafiza_.goruldu(sayfa)
         ekran_iste = False
         istem_metni = koruma.gizle(istem(model_metni, onceki, derinlik, notlar, hafiza_, adimlar, sayfa, geri_bildirim,
@@ -296,6 +312,10 @@ def dongu(g, gorev_metni, onceki, model, t, durum, derinlik):
             geri_bildirim, son_imza, tekrar, son_imzalar = DEVAM_METNI, None, 0, []
             continue
 
+        if e == "captcha" and alan_adi(t.url) in engelli_siteler:
+            geri_bildirim = engel_metni(t.url)
+            adimlar.append(f"{adim_no}. captcha -> site robot doğrulamasıyla engelli, atlanmalı")
+            continue
         if e == "captcha":
             onaylandi = t.captcha_onayla()
             yield adim("tikla", "Robot doğrulamasının onay kutusu işaretlendi" if onaylandi else "Robot doğrulaması bulunamadı")
@@ -310,7 +330,7 @@ def dongu(g, gorev_metni, onceki, model, t, durum, derinlik):
                                         else "Robot doğrulaması 15 dakika içinde çözülmediği için görev bitti.")
                         durum["kod"] = "durduruldu" if komut == "durdur" else "zaman_asimi"
                         return
-                    geri_bildirim = "Robot doğrulaması tamamlandı; kaldığın yerden devam et."
+                    geri_bildirim = dogrulama_sonrasi(t.url, t.bak(), engelli_siteler)
             yapilan += 1
             continue
         if e == "oku":
