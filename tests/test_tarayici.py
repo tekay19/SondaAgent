@@ -256,6 +256,34 @@ def test_yavas_sunucuda_aramada_enterdan_sonra_sonuc_beklenir(tarayici, site):
     assert s["url"].endswith("/cikis.html?q=deneme") and "Çıkış yapıldı" in s["metin"]
 
 
+def test_tikla_donunce_bagli_yeni_sayfa_gelmis_olur(tarayici, site):
+    """Canlı test (kullanıcının Chrome'u): Logout bağlantısından sonra okuma geçişi beklemedi, eski sayfa görülünce
+    model iki kez daha bastı. Tıklamanın başlattığı sayfa geçişi tikla içinde beklenir."""
+    tarayici.git(f"{site}/yavas_link.html")
+    tarayici.tikla(bul(tarayici.bak(), "Çıkış")["no"])
+    assert tarayici.sayfa.url.endswith("/cikis.html")
+
+
+def test_ekran_goruntusu_takilirsa_kisa_surede_vazgecilir():
+    """Canlı test: Chrome arka plandaki sekmede ekran görüntüsü üretmiyor; Playwright varsayılan 30 sn bekliyordu ve
+    az öğeli sayfalarda her adım ~33 sn sürdü."""
+    import time
+    from sonda.tarayici import Tarayici
+
+    class TakilanSayfa:
+        def on(self, *a): pass
+        def wait_for_timeout(self, ms): pass
+        def is_closed(self): return False
+        def screenshot(self, timeout=30000, **k):
+            time.sleep(timeout / 1000)
+            raise TimeoutError("Timeout exceeded")
+    t = Tarayici(TakilanSayfa())
+    basla = time.monotonic()
+    with pytest.raises(TimeoutError):
+        t.ekran_goruntusu()
+    assert time.monotonic() - basla < 6
+
+
 def test_tiklamanin_baslattigi_istek_bitince_sayfa_okunur(tarayici, site):
     """Canlı Trendyol testi: "+" sonrası sepet arka planda güncellenirken sayfa okundu, adet hâlâ 1 görününce model
     yeniden bastı (ikinci tıklama tutsaydı adet 3 olurdu)."""

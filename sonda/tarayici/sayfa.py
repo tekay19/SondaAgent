@@ -22,6 +22,7 @@ def captcha_adresi_mi(url):
 
 ZAMAN_ASIMI = 20000
 YATIS_SINIRI = 4  # sn: tıklamanın başlattığı arka plan isteklerini en çok bu kadar bekle
+EKRAN_SINIRI = 5000  # ms: ekran görüntüsü için
 
 
 class TiklamaEngeli(Exception):
@@ -85,6 +86,7 @@ class Tarayici:
             self.sayfa.wait_for_timeout(700)  # JS ile çizilen içerik için kısa pay
             if bekleyen:
                 self._istekleri_bekle(bekleyen)
+                self.sayfa.wait_for_load_state("domcontentloaded", timeout=ZAMAN_ASIMI)  # geçiş olduysa yeni sayfa
         except SekmeKapandi:
             raise
         except Exception:
@@ -92,11 +94,16 @@ class Tarayici:
 
     @contextmanager
     def _istekler(self):
-        """Bu blokta başlayan ve henüz bitmemiş XHR/fetch istekleri (sepet adedi, filtre gibi arka plan güncellemeleri)."""
+        """Bu blokta başlayan ve henüz bitmemiş istekler: XHR/fetch (sepet adedi, filtre gibi arka plan güncellemeleri)
+        ve ana çerçevenin sayfa geçişi (bağlantı, form). Kullanıcının Chrome'unda okuma geçişi kendiliğinden beklemiyor."""
         sayfa, bekleyen = self.sayfa, set()
 
         def basladi(istek):
-            if istek.resource_type in ("xhr", "fetch"):
+            try:
+                gecis = istek.is_navigation_request() and istek.frame == sayfa.main_frame
+            except Exception:  # service worker isteklerinin çerçevesi yoktur
+                gecis = False
+            if gecis or istek.resource_type in ("xhr", "fetch"):
                 bekleyen.add(istek)
 
         def bitti(istek):
@@ -290,7 +297,8 @@ class Tarayici:
             pass
 
     def ekran_goruntusu(self):
-        return self.sayfa.screenshot(type="jpeg", quality=60)
+        # Chrome arka plandaki sekmede kare üretmez; varsayılan 30 sn beklemek her adımı yarım dakika uzatıyordu
+        return self.sayfa.screenshot(type="jpeg", quality=60, timeout=EKRAN_SINIRI)
 
     def tam_metin(self):
         metin = trafilatura.extract(self.sayfa.content(), include_tables=True) or ""
