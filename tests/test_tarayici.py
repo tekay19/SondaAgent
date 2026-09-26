@@ -151,6 +151,18 @@ def test_acilir_pencere_kapaninca_onceki_sekmeye_doner(tarayici, site):
     assert tarayici.bak()["baslik"] == "Açılır pencere"
 
 
+def test_baska_sitede_acilan_pencereye_gecilmez(tarayici, site):
+    """Canlı test (Amazon): bir tıklama ticari.renault.com.tr reklam penceresi açtı; Sonda ona geçip bir süre orada
+    dolaştı. Başka sitede açılan pencere kapatılır, Sonda kendi sayfasında kalır ve açılan adres bildirilir."""
+    tarayici.git(f"{site}/reklam.html")
+    tarayici.tikla(bul(tarayici.bak(), "Yeni (3) teklif")["no"])
+    tarayici.sayfa.wait_for_timeout(500)
+    assert tarayici.url.endswith("/reklam.html")
+    assert len(tarayici.sayfa.context.pages) == 1
+    assert [u.split("/")[-1] for u in tarayici.kapatilan_pencereler()] == ["giris.html"]
+    assert tarayici.kapatilan_pencereler() == []  # bir kez bildirilir
+
+
 def test_sekme_kapaninca_sekme_kapandi_hatasi(tarayici, site):
     from sonda.tarayici import baglanti as tr
     tarayici.git(f"{site}/giris.html")

@@ -16,7 +16,11 @@ def uygula(t, karar, gorev_metni, notlar, oge):
         return adim("gezin", f"{alan_adi(t.url)} açıldı"), f"{t.url} açıldı."
     if e == "tikla":
         t.tikla(karar["no"])
-        return adim("tikla", f"“{ad}” tıklandı"), f"“{ad}” tıklandı. Sayfanın yeni haline bak."
+        ek = ""
+        if kapatilan := t.kapatilan_pencereler():
+            ek = (f" Tıklama başka bir sitede yeni pencere açtı ({kapatilan[0][:100]}); reklam olabileceği için "
+                  "kapatıldı. Göreve gerekliyse git eylemiyle o adrese git.")
+        return adim("tikla", f"“{ad}” tıklandı"), f"“{ad}” tıklandı. Sayfanın yeni haline bak.{ek}"
     if e == "yaz":
         t.yaz(karar["no"], karar["metin"], karar.get("enter_izni", False))
         ek = " ve Enter'a basıldı" if karar.get("enter_izni") else ""

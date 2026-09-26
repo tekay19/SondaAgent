@@ -706,6 +706,15 @@ def test_dogrulama_cozulmeden_devam_denirse_site_atlanir(sahte, yerel_tarayici_a
     assert "engelli" in m.istemler[3].split("SON EYLEMİN SONUCU:")[1].split("MEVCUT SAYFA")[0]
 
 
+def test_baska_sitede_acilan_pencere_modele_bildirilir(sahte, yerel_tarayici_ac, site):
+    m = sahte([{"eylem": "git", "url": f"{site}/reklam.html"}, {"eylem": "tikla", "no": None}, {"eylem": "bitir"}])
+    _tikla_metin(m, "Yeni (3) teklif")
+    calistir(yerel_tarayici_ac)
+    geri = m.istemler[2].split("SON EYLEMİN SONUCU:")[1].split("MEVCUT SAYFA")[0]
+    assert "reklam olabileceği" in geri and "giris.html" in geri
+    assert "reklam.html" in m.istemler[2].split("MEVCUT SAYFA")[1].splitlines()[1]  # Sonda kendi sayfasında
+
+
 def test_sistem_promptu_captcha_eylemini_anlatir():
     assert '"captcha"' in gorev.promptlar.SISTEM
 

@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 
 import trafilatura
 
+from ..koruma import _kayitli_alan
 from .js import BAK, CAPTCHA_BASLIKLARI, CAPTCHA_KUTULARI, ENGEL
 
 # Bilinen robot doğrulaması sunucuları -> çerçeve adresinin yol öneki. Adresin herhangi bir yerinde geçen kelimeye
@@ -33,10 +34,19 @@ class SekmeKapandi(Exception):
     """Sonda'nın sekmesi (ve dönülecek önceki sekmeler) kapandı; büyük ihtimalle kullanıcı kapattı."""
 
 
+def _baska_site(yeni_url, simdiki_url):
+    """Açılan pencere başka bir sitede mi? about:blank gibi adresler sayfanın kendi penceresidir."""
+    y, s = urlparse(yeni_url), urlparse(simdiki_url)
+    if y.scheme not in ("http", "https") or not y.hostname or not s.hostname:
+        return False
+    return _kayitli_alan(y.hostname)[0] != _kayitli_alan(s.hostname)[0]
+
+
 class Tarayici:
     def __init__(self, sayfa, kapat=None):
         self._kapat = kapat
         self._onceki = []  # açılır pencereye geçince önceki sekmeler; pencere kapanırsa geri dönülür
+        self._kapatilan = []  # başka sitede açılıp kapatılan pencerelerin adresleri (modele bir kez bildirilir)
         self._ac(sayfa)
 
     def _ac(self, sayfa):
@@ -45,8 +55,20 @@ class Tarayici:
         sayfa.on("dialog", lambda d: d.dismiss())  # confirm("Sipariş verilsin mi?") gibi pencereler reddedilir
 
     def _acilir_pencere(self, yeni):
+        # Başka sitede açılan pencere çoğunlukla reklamdır (Amazon'da ticari.renault.com.tr): geçilmez, kapatılır
+        if _baska_site(yeni.url, self._sayfa.url):
+            self._kapatilan.append(yeni.url)
+            try:
+                yeni.close()
+            except Exception:
+                pass
+            return
         self._onceki.append(self._sayfa)
         self._ac(yeni)  # window.open ile açılan sekmede çalışmaya devam et
+
+    def kapatilan_pencereler(self):
+        adresler, self._kapatilan = self._kapatilan, []
+        return adresler
 
     @property
     def sayfa(self):
