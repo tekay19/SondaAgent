@@ -22,6 +22,15 @@ def _sahte_akis(senaryo):
 
 
 def _gorev_senaryosu(soru):
+    if "atıf" in soru:
+        yield {"tur": "yon", "hedef": "gorev"}
+        yield {"tur": "gorev_basladi", "id": "g2"}
+        yield {"tur": "gorev_bitti", "durum": "tamamlandi"}
+        for no in (1, 2):
+            yield {"tur": "kaynak", "no": no, "url": f"https://site{no}.com/", "baslik": f"Site {no}", "alan": f"site{no}.com"}
+        yield {"tur": "token", "metin": "Fiyat 100 TL [1, 2]. Adım numarası [16, 17]. Karışık [2, 16]. Tek [1]."}
+        yield {"tur": "bitti", "sure": 5.0}
+        return
     if "teşekkür" in soru:
         yield {"tur": "yon", "hedef": "sohbet"}
         yield {"tur": "token", "metin": "Rica ederim!"}
@@ -169,6 +178,18 @@ def test_bulut_model_secilince_gizlilik_rozeti_degisir(arayuz):
     s.select_option("#model", yerel)
     assert "Model bu bilgisayarda çalışır" in s.inner_text(".yerel-rozet")
     s.click("[data-gemini-sil]")
+    s.close()
+
+
+def test_virgullu_kaynak_numaralari_tiklanir_uydurmalar_gizlenir(arayuz):
+    """Canlı görev cevapları çoğu zaman [1, 2] yazıyordu; bu biçim ham metin kalıyordu. Listede olmayan [16, 17]
+    (adım numarası) da görünüyordu."""
+    s = _sayfa(arayuz)
+    _gonder(s, "atıf dene")
+    s.wait_for_selector(".durum-satiri.tamam")
+    cevap = s.locator(".cevap").last
+    assert cevap.locator("button.atif").evaluate_all("l => l.map(b => b.dataset.no)") == ["1", "2", "2", "1"]
+    assert "[" not in cevap.inner_text() and "16" not in cevap.inner_text()
     s.close()
 
 
