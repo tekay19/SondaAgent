@@ -49,19 +49,26 @@ def iki_adim_mi(sayfa):
 # Seçimi kesinleştiren işlemler: seçim görevinde adaylar karşılaştırılmadan yapılmasın
 _ISLEM = re.compile(r"sepete ekle|add to (cart|basket|bag)|favori|wishlist|listeye ekle|add to list|\bbasvur"
                     r"|\bapply\b|teklif (ver|gonder)|submit (a )?proposal|rezervasyon|\breserve\b|\bbook\b")
-# Arama ve liste sayfaları aday sayılmaz (Trendyol /sr?q=, Hepsiburada /ara?q=, Amazon /s?k=, Booking searchresults)
-_ARAMA_SAYFASI = re.compile(r"[?&](q|k|s|kw|ss|query|search|keyword|keywords|searchterm|text)=|/search|/sr(\?|$)"
-                            r"|/ara(\?|$|\.html)|/arama", re.I)
+# Arama ve liste sayfaları aday sayılmaz (Trendyol /sr?q=, Hepsiburada /ara?q=, Amazon /s?k=, Booking searchresults).
+# Yola bakılır: ürün sayfalarının sorgusunda da arama sözü olabilir (Amazon /dp/...?keywords=...).
+_ARAMA_YOLU = re.compile(r"(^|/)(search|searchresults[\w.-]*|sr|s|ara|arama|results)(\.html?|\.php|\.aspx)?(/|$)", re.I)
+_ARAMA_SORGUSU = re.compile(r"(^|&)(q|s|k|query|search|keywords?)=", re.I)  # yalnızca ana sayfada (site.com/?s=...)
 
 
 def islem_butonu(oge):
     return bool(_ISLEM.search(koruma.sade(" ".join(str(oge.get(k) or "") for k in ("metin", "aria", "baslik", "deger")))))
 
 
+def arama_sayfasi(url):
+    p = urlparse(url)
+    if _ARAMA_MOTORU.search(url) or _ARAMA_YOLU.search(p.path):
+        return True
+    return p.path in ("", "/") and bool(_ARAMA_SORGUSU.search(p.query))
+
+
 def aday_sayfalari(notlar):
     """Not alınan aday sayfaları (ürün/ilan/otel): arama motoru, arama ve liste sayfaları hariç."""
-    return {n["url"].split("#")[0] for n in notlar
-            if not _ARAMA_MOTORU.search(n["url"]) and not _ARAMA_SAYFASI.search(n["url"])}
+    return {n["url"].split("#")[0] for n in notlar if not arama_sayfasi(n["url"])}
 
 
 def aday_uyarisi(derinlik, notlar):

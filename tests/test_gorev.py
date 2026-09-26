@@ -1314,6 +1314,32 @@ def test_secim_gorevinde_liste_notu_aday_sayilmaz_ve_bitirme_reddedilir(sahte, y
     assert len(m.istemler) == 8
 
 
+# Canlı testlerde not alınan gerçek adresler: arama/liste sayfası aday sayılmaz, ürün/otel sayfası sayılır
+@pytest.mark.parametrize("url", [
+    "https://www.trendyol.com/sr?q=20000+mah+powerbank",
+    "https://www.hepsiburada.com/ara?q=kablosuz+mouse&filtreler=fiyat:300-600&siralama=yorumsayisi",
+    "https://www.amazon.com.tr/s?k=samsung+galaxy+s25+fe",
+    "https://www.booking.com/searchresults.tr.html?ss=Ankara",
+    "https://www.google.com/travel/search?q=K%C4%B1z%C4%B1lay%20Ankara%20otelleri&hl=tr",
+    "https://www.google.com/search?q=Hamit+Hotel",
+    "http://127.0.0.1:5000/magaza/ara.html?q=nvme",
+    "https://blog.ornek.com/?s=ssd",
+])
+def test_arama_ve_liste_sayfalari_aday_sayilmaz(url):
+    assert gorev.sayfa.aday_sayfalari([{"url": url}]) == set()
+
+
+@pytest.mark.parametrize("url", [
+    "https://www.amazon.com.tr/Samsung-Telefon/dp/B0FPRHQ8CH/ref=sr_1_1?dib=eyJ&keywords=samsung+galaxy+s25+fe&qid=1&sr=8-1",
+    "https://www.trendyol.com/samsung/galaxy-s25-fe-8gb-256gb-siyah-p-984233972?boutiqueId=61&merchantId=426373",
+    "https://www.hepsiburada.com/lenovo-400-wireless-mouse-gy50r91293-pm-HB00000NBN6Y?magaza=Hepsiburada",
+    "https://www.google.com/travel/hotels/entity/ChoIvK2p5faF5MnbARoNL2cvMTFzYjk2MjlxaxAB?g2lb=2502548",
+    "http://127.0.0.1:5000/magaza/urun.html?id=2",
+])
+def test_urun_ve_otel_sayfalari_aday_sayilir(url):
+    assert gorev.sayfa.aday_sayfalari([{"url": url}]) == {url}
+
+
 def test_secim_gorevi_olmayan_isleme_kapi_uygulanmaz(sahte, yerel_tarayici_ac, site):
     kayit = {}
     m = sahte([{"eylem": "git", "url": f"{site}/magaza/urun.html?id=2"}, {"eylem": "tikla", "no": None},
