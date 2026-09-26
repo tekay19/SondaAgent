@@ -451,6 +451,20 @@ def test_serbest_modda_kart_bilgisi_metni_olan_sayfada_son_adim_butonu_engelleni
     assert not k.izin
 
 
+@pytest.mark.parametrize("serbest", [False, True])
+def test_ipucu_cumlesindeki_para_sozu_butonu_engellemez(serbest):
+    """Canlı Trendyol testi: sepetteki "−" butonunun title'ı "Bu üründen en az 1 adet satın alabilirsin." idi;
+    "satın al" yüzünden adet azaltma para butonu sayıldı ve engellendi."""
+    azalt = buton("", aria="Ürün adedi azaltma", baslik="Bu üründen en az 1 adet satın alabilirsin.")
+    assert koruma.kontrol({"eylem": "tikla", "no": 1}, azalt, serbest=serbest).izin
+
+
+@pytest.mark.parametrize("oge", [buton("✓", baslik="Siparişi tamamla"), buton("", baslik="Satın al"),
+                                 buton("→", aria="Ödemeyi tamamla")])
+def test_adi_yalniz_ipucunda_ya_da_aria_da_olan_ikon_buton_yine_engellenir(oge):
+    assert not koruma.kontrol({"eylem": "tikla", "no": 1}, oge, serbest=True).izin
+
+
 def test_kart_alani_olan_sayfada_devam_normal_modda_da_engellenir():
     """Ödeme sayfası adresten tanınmasa da (kart alanı var) "Devam" kayıtlı kartla siparişi bitirebilir."""
     k = koruma.kontrol({"eylem": "tikla", "no": 1}, buton("Devam"), url="https://site.com/adim-3",

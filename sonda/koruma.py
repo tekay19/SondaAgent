@@ -113,12 +113,21 @@ def hassas_alan(oge):
     return bool(_HASSAS.search(sade(" ".join(str(oge.get(k) or "") for k in ("metin", "ad", "kimlik", "yer", "aria")))))
 
 
+def buton_adi(oge):
+    """Butonun işini anlatan ad: görünen metin, değer ve aria. title yalnızca bunlarda harf yoksa (ikon buton) katılır:
+    ipucu cümlesi butonun işi değildir (Trendyol "−" butonu: "Bu üründen en az 1 adet satın alabilirsin.")."""
+    ad = " ".join(str(oge.get(k) or "") for k in ("metin", "deger", "aria"))
+    if not re.search(r"[^\W\d_]", ad):
+        ad += " " + str(oge.get("baslik") or "")
+    return sade(ad)
+
+
 def yasak_buton(oge):
-    return bool(_YASAK_BUTON.search(sade(" ".join(str(oge.get(k) or "") for k in ("metin", "deger", "aria", "baslik")))))
+    return bool(_YASAK_BUTON.search(buton_adi(oge)))
 
 
 def para_butonu(oge):
-    return bool(_PARA_BUTON.search(sade(" ".join(str(oge.get(k) or "") for k in ("metin", "deger", "aria", "baslik")))))
+    return bool(_PARA_BUTON.search(buton_adi(oge)))
 
 
 def _kayitli_alan(host):
@@ -295,7 +304,7 @@ def kontrol(eylem, oge=None, form_ogeleri=(), gorev_metni="", url="", gizliler=(
                      and _enter_guvenli(form_ogeleri))
     if ad == "tikla":
         kimlik = _kimlik_gorevi(gorev_metni, url)
-        metin = sade(" ".join(str(oge.get(k) or "") for k in ("metin", "deger", "aria", "baslik")))
+        metin = buton_adi(oge)
         if kimlik and _GIRIS_BUTONU.search(metin) and not _YASAK_BUTON.search(_GIRIS_BUTONU.sub(" ", metin)):
             return Karar(True)
         odemede = odeme_sayfasi(url, sayfa)
