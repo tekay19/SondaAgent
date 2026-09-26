@@ -72,3 +72,50 @@ GOREVLER_ZOR = [
      "beklenen": "tarih ve kişi doğru; 3 otelin hepsi mesafe/puan/fiyat kısıtına uyuyor; ücretsiz iptal bilgisi; "
                  "rezervasyon yapılmadı"},
 ]
+
+# 26 Eylül: "uzun, karmaşık, tek görev tek siteden yapılmasın" — her biri birçok siteden bilgi toplayıp birleştirir,
+# hesap yapar ve karar verir.
+GOREVLER_UZUN = [
+    {"id": 201, "zorluk": "uzun", "alan": "alışveriş + bağımsız inceleme + işlem",
+     "gorev": "Sony WH-1000XM5 kulaklığın fiyatını Trendyol, Hepsiburada, Amazon.com.tr ve Teknosa'da karşılaştır: her "
+              "sitede güvenilir satıcıdaki (resmi mağaza ya da satıcı puanı 9 ve üzeri) en ucuz teklifin fiyatını, "
+              "satıcısını, garanti türünü (resmi distribütör/ithalatçı) ve tahmini kargo süresini bul. Ayrıca en az iki "
+              "bağımsız inceleme sitesinden (ör. rtings.com, techradar.com) kulaklığın en önemli artılarını ve "
+              "eksilerini topla. Sonunda en iyi teklifi gerekçesiyle öner ve Trendyol'daki güvenilir satıcının ürününü "
+              "favorilere ekle.",
+     "beklenen": "4 mağaza + 2 inceleme sitesi; her mağazada satıcı/puan/fiyat/garanti/kargo; artı-eksi listesi; "
+                 "gerekçeli öneri; Trendyol'da favorilere eklendi"},
+    {"id": 202, "zorluk": "uzun", "alan": "seyahat planı + bütçe hesabı",
+     "gorev": "15-17 Kasım 2026 hafta sonu İzmir'den Kapadokya'ya 2 kişilik bir gezi planla: (1) Google Flights'ta "
+              "İzmir'den Kayseri (ASR) ya da Nevşehir (NAV) için gidiş-dönüş en ucuz uçuşu bul; (2) Google'ın otel "
+              "aramasında Göreme'de puanı 4.5 ve üzeri, 2 gecelik toplamı 8.000 TL'nin altında 2 otel bul; (3) en az iki "
+              "farklı sitede sıcak hava balonu turu fiyatlarını ve iptal koşullarını karşılaştır; (4) o tarihler için "
+              "Göreme'nin hava durumu tahminini bul, yoksa Kasım ortalamasını bul. Kişi başı toplam tahmini bütçeyi "
+              "hesapla ve hepsini tabloya koy. Hiçbir rezervasyon ve satın alma yapma.",
+     "beklenen": "uçuş (havayolu, saat, fiyat), 2 otel kısıtlara uygun, 2 siteden balon fiyatı ve iptal koşulu, hava "
+                 "durumu ya da ortalaması (tahmin yoksa bunu söylemesi), doğru hesaplanmış kişi başı bütçe"},
+    {"id": 203, "zorluk": "uzun", "alan": "resmî veri doğrulama + hesap",
+     "gorev": "2026 yılı asgari ücretinin brüt ve net tutarını resmî bir kaynaktan (Çalışma ve Sosyal Güvenlik "
+              "Bakanlığı ya da Resmî Gazete) bul ve en az iki haber sitesiyle doğrula; 2025 yılı net asgari ücretini de "
+              "bul ve net artış yüzdesini hesapla. Ardından TÜİK'in sitesinden 2026'da açıklanan en son yıllık "
+              "enflasyon oranını (TÜFE) bul ve asgari ücretteki artışla karşılaştırıp reel değişimi kısaca yorumla. "
+              "Kaynaklar arasında çelişki varsa belirt.",
+     "beklenen": "resmî kaynak + 2 haber sitesi; 2026 brüt/net ve 2025 net; doğru artış yüzdesi; TÜİK'ten son yıllık "
+                 "TÜFE ve tarihi; reel değişim yorumu; çelişkiler"},
+    {"id": 204, "zorluk": "uzun", "alan": "iş ilanı taraması + beceri analizi",
+     "gorev": "Kariyer.net ve Indeed Türkiye'de (tr.indeed.com) İzmir'de ya da uzaktan çalışılabilen 'Python' "
+              "geliştirici ilanlarını ara. Son iki haftada yayınlanmış en az 6 ilanı (her siteden en az 2) şirket, "
+              "pozisyon, çalışma şekli (uzaktan/hibrit/ofis), istenen deneyim yılı ve varsa maaş aralığıyla tabloya "
+              "koy. İlanlarda en sık istenen 5 teknolojiyi say ve bana hangi becerileri öne çıkarmam gerektiğini öner. "
+              "Hiçbir ilana başvurma.",
+     "beklenen": "iki site, en az 6 ilan (her siteden 2+), tablo alanları dolu, teknoloji sayımı ilanlara dayanıyor, "
+                 "öneri; başvuru yapılmadı"},
+    {"id": 205, "zorluk": "uzun", "alan": "teknik karşılaştırma (GitHub + doküman + PyPI)",
+     "gorev": "FastAPI, Django REST Framework ve Litestar'ı karşılaştır: her birinin GitHub deposundan yıldız sayısını, "
+              "son sürüm numarasını ve tarihini ve açık issue sayısını bul; resmî dokümantasyonlarından async desteğini "
+              "ve OpenAPI/Swagger dokümanı üretip üretmediğini doğrula; pypistats.org'dan son 1 aylık indirme sayısını "
+              "bul. Hepsini tabloya koy ve 3 kişilik bir ekibin yeni bir API projesi için hangisini seçmesi gerektiğini "
+              "gerekçesiyle öner.",
+     "beklenen": "3 GitHub deposu (yıldız, sürüm+tarih, açık issue), 3 doküman doğrulaması, pypistats indirmeleri, "
+                 "tablo ve gerekçeli öneri"},
+]

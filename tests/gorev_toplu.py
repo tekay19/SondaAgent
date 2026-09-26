@@ -1,5 +1,5 @@
 """Görevleri çalışan Sonda sunucusuna (python server.py) arayüzdeki gibi verir, olayları ve sonucu kaydeder.
-Kullanım: python tests/gorev_toplu.py <etiket> [id,id,...] [--model gemini:gemini-flash-latest] [--kilitli]
+Kullanım: python tests/gorev_toplu.py <etiket> [id,id,...] [--liste zor|uzun] [--model ...] [--kilitli]
 Varsayılan: Gemini Flash ve "Butonlara kendisi bassın" açık (--kilitli kapatır). Devretmede DEVIR_BEKLE saniye
 bekler (robot doğrulaması kendiliğinden geçebilir), sonra durdurur. Sonuç: tests/sonuc_gorev_<etiket>.json"""
 import argparse
@@ -13,11 +13,12 @@ import httpx
 KOK = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(KOK / "tests"))
 
-from gorevler import GOREVLER_ZOR  # noqa: E402
+from gorevler import GOREVLER_UZUN, GOREVLER_ZOR  # noqa: E402
 
 SUNUCU = "http://127.0.0.1:8765"
 DEVIR_BEKLE = 40
-GOREV_SINIRI = 20 * 60
+GOREV_SINIRI = 30 * 60
+LISTELER = {"zor": GOREVLER_ZOR, "uzun": GOREVLER_UZUN}
 
 
 def calistir(g, model, serbest):
@@ -71,11 +72,12 @@ def main():
     p.add_argument("idler", nargs="?")
     p.add_argument("--model", default="gemini:gemini-flash-latest")
     p.add_argument("--kilitli", action="store_true", help="'Butonlara kendisi bassın' kapalı")
+    p.add_argument("--liste", choices=LISTELER, default="zor")
     a = p.parse_args()
     secili = {int(x) for x in a.idler.split(",")} if a.idler else None
     dosya = KOK / "tests" / f"sonuc_gorev_{a.etiket}.json"
     sonuclar = []
-    for g in GOREVLER_ZOR:
+    for g in LISTELER[a.liste]:
         if secili and g["id"] not in secili:
             continue
         print(f"#{g['id']} ({g['zorluk']}, {g['alan']}) başlıyor", flush=True)
