@@ -41,6 +41,7 @@ def sahte(monkeypatch):
         monkeypatch.setattr(gorev.karar, "karar_al", m)
         monkeypatch.setattr(gorev.karar, "derinlik_belirle", lambda *a: dict(DERINLIK))
         monkeypatch.setattr(gorev.karar, "ilerleme_degerlendir", lambda *a: {})
+        monkeypatch.setattr(gorev.karar, "gorev_kontrolu", lambda *a: [], raising=False)
         monkeypatch.setattr(gorev.dongu, "sonuc_yaz", lambda *a, **k: iter([{"tur": "token", "metin": "ÖZET"},
                                                                           {"tur": "cevap_bitti", "metin": "ÖZET"}]))
         return m
@@ -1321,6 +1322,31 @@ def test_secim_gorevi_olmayan_isleme_kapi_uygulanmaz(sahte, yerel_tarayici_ac, s
     calistir(yerel_tarayici_ac, kayit=kayit)
     assert "Kioxia" in isinde(lambda: kayit["t"].sayfa.evaluate("localStorage.getItem('sepet')"))
     isinde(kayit["t"]._kapat_asil)
+
+
+# ---- "Ne iş verirsem vereyim dediğimi yapmalı": bitirmeden önce görev maddelere ayrılıp kontrol edilir
+def test_gorev_kontrolu_yapilmayan_maddeleri_doner(monkeypatch):
+    cevap = ('{"maddeler": [{"istek": "adedi 2 yap", "yapildi": true, "kanit": "adım 2"}, '
+             '{"istek": "adedi yeniden 1\'e düşür", "yapildi": false, "kanit": "azaltma yapılmadı"}, "bozuk"]}')
+    monkeypatch.setattr(gorev.karar.saglayici, "sohbet", lambda *a, **k: Yanit(cevap))
+    assert gorev.karar.gorev_kontrolu("m", "g", [], [], "") == ["adedi yeniden 1'e düşür (azaltma yapılmadı)"]
+    monkeypatch.setattr(gorev.karar.saglayici, "sohbet", lambda *a, **k: Yanit("bozuk"))
+    assert gorev.karar.gorev_kontrolu("m", "g", [], [], "") == []
+
+
+def test_gorevin_eksik_kismi_varken_bitirme_reddedilir(sahte, yerel_tarayici_ac, site, monkeypatch):
+    m = sahte([{"eylem": "git", "url": f"{site}/giris.html"}, {"eylem": "not_al", "metin": "A yapıldı"},
+               {"eylem": "bitir", "sonuc": "A yapıldı"},
+               {"eylem": "not_al", "metin": "B de yapıldı"}, {"eylem": "bitir", "sonuc": "A ve B"}])
+    cagrilar = []
+
+    def kontrol(model, gorev_metni, notlar, adimlar, sonuc):
+        cagrilar.append(sonuc)
+        return ["B'yi yap (yapılmadı)"]
+    monkeypatch.setattr(gorev.karar, "gorev_kontrolu", kontrol, raising=False)
+    calistir(yerel_tarayici_ac, metin="A'yı yap, sonra B'yi yap")
+    assert "B'yi yap" in m.istemler[3].split("SON EYLEMİN SONUCU:")[1].split("MEVCUT SAYFA")[0]
+    assert len(m.istemler) == 5 and cagrilar == ["A yapıldı"]  # ikinci bitirmede yeniden sorulmaz
 
 
 def test_serbest_kurali_sistem_istemine_girer(monkeypatch):

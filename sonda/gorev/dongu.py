@@ -83,7 +83,7 @@ def dongu(g, gorev_metni, onceki, model, t, durum, derinlik):
     notlar, adimlar, hafiza_ = durum["notlar"], durum["adimlar"], durum["hafiza"]
     maks = min(ayar.MAKS_ADIM, derinlik["maks_adim"])
     geri_bildirim, ekran_iste, son_imza, tekrar, bitir_red = "", False, None, 0, 0
-    yapilan, erken_red, form_red, son_mesaj, islem_red = 0, False, False, "", 0
+    yapilan, erken_red, form_red, son_mesaj, islem_red, kontrol_edildi = 0, False, False, "", 0, False
     captcha_denenen, son_okuma, son_imzalar = set(), None, []
     durum["gizli"].update(koruma.gizli_adaylar(gorev_metni))
     kayit = GorevKaydi(g.id, durum["gizli"])
@@ -207,6 +207,15 @@ def dongu(g, gorev_metni, onceki, model, t, durum, derinlik):
                                    "olabilir. Notlarını gerekirse düzelt.")
                 adimlar.append(f"{adim_no}. bitirmek istedi, sayfalar tam incelenmediği için devam{dusunce_ek}")
                 continue
+            if not kontrol_edildi and adim_no < maks - 3:  # "dediğimi yapmalı": görevin her kısmı yapıldı mı?
+                kontrol_edildi = True
+                if eksik_maddeler := kararlar.gorev_kontrolu(model, model_metni, notlar, adimlar, karar.get("sonuc", "")):
+                    liste = koruma.gizle("; ".join(eksik_maddeler), durum["gizli"])
+                    geri_bildirim = (f"Henüz bitirme: görevin şu kısımları yapılmamış görünüyor: {liste}. Bunları şimdi "
+                                     "yap. Gerçekten yapılamıyorsa nedenini not al, sonra bitir.")
+                    adimlar.append(f"{adim_no}. bitirmek istedi, görevin bazı kısımları eksik olduğu için devam{dusunce_ek}")
+                    yield {"tur": "anlatim", "metin": f"Bitirmeden önce kontrol ettim; eksik kalan: {liste[:200]}"}
+                    continue
             durum["sonuc"], durum["hal"] = koruma.gizle(karar.get("sonuc", ""), durum["gizli"]), "Görev tamamlandı."
             durum["kod"] = "tamamlandi"
             return

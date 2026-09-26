@@ -138,6 +138,17 @@ kaldı, gidişat doğru mu, bir şeyi atladın mı (kaydırılmamış sayfa, aç
 daha akıllıca bir yol var mı? Sadece JSON döndür:
 {{"degerlendirme": "kullanıcıya 1-2 cümlelik doğal Türkçe durum özeti", "plan": ["kalan adımlar, güncellenmiş"]}}"""
 
+KONTROL_PROMPTU = """Bugün {tarih}. Kullanıcının tarayıcısında bir görev yürüttün ve bitirmek üzeresin. Bitirmeden önce
+kullanıcının istediği HER ŞEYİN yapıldığını kontrol et.
+Görevi maddelere ayır: yapılacak her iş (ör. "adedi 2 yap", "sonra 1'e düşür"), istenen her bilgi (ör. "toplam fiyat",
+"PEP numarası"), her kısıt (ör. "300-600 TL", "en az 4 puan", "aktarmasız") ve istenen sayı ya da biçim (ör. "3 otel",
+"5 madde", "tablo"). Her madde için notlara, son adımlara ve özete bakarak gerçekten yapılıp yapılmadığına karar ver;
+yapılmış gibi söylenen ama adımlarda ya da notlarda kanıtı olmayan maddeyi yapılmadı say.
+Bir madde yapılamadıysa ama notlarda ya da adımlarda geçerli bir nedeni varsa (site izin vermiyor, aranan şey yok,
+adım kullanıcıya bırakıldı, güvenlik kuralı gereği kullanıcının işi) onu yapıldı say. Son cevap notlardan yazılacağı
+için biçim maddelerini (tablo, madde sayısı) yapıldı say.
+Sadece JSON döndür: {{"maddeler": [{{"istek": "...", "yapildi": true, "kanit": "kısa kanıt ya da eksik olan"}}]}}"""
+
 CAPTCHA_SEBEBI = ("🧩 Robot doğrulaması tamamlanamadı (resimli bulmaca ya da ek kontrol istiyor). Chrome'da "
                   "doğrulamayı yap; tamamlanınca kendiliğinden devam edeceğim.")
 IKI_ADIM_TAMAM = "Kullanıcı iki adımlı doğrulamayı tamamladı; sayfaya bak ve kaldığın yerden devam et."

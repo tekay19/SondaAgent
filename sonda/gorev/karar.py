@@ -6,7 +6,8 @@ from .. import hafiza, koruma
 from .. import model as saglayici
 from ..ortak import JSON_SECENEKLERI, bugun
 from . import ayar
-from .promptlar import BUTON_KURALI, BUTON_KURALI_SERBEST, DEGERLENDIRME_PROMPTU, DERINLIK_PROMPTU, SISTEM
+from .promptlar import (BUTON_KURALI, BUTON_KURALI_SERBEST, DEGERLENDIRME_PROMPTU, DERINLIK_PROMPTU, KONTROL_PROMPTU,
+                        SISTEM)
 
 
 def dogrula(veri):
@@ -79,6 +80,27 @@ def derinlik_belirle(model, gorev_metni, onceki):
     plan = [a.strip() for a in plan if isinstance(a, str) and a.strip()][:6]
     return {"derinlik": derinlik, "min_site": max(1, min(5, min_site)), "inceleme": veri.get("inceleme") is True,
             "maks_adim": min(ayar.MAKS_ADIM, ayar.ADIM_SINIRI[derinlik]), "plan": plan, "min_aday": min_aday}
+
+
+def gorev_kontrolu(model, gorev_metni, notlar, adimlar, sonuc):
+    """Bitirmeden önce görev maddelere ayrılır, her maddenin yapılıp yapılmadığına notlar ve adımlardan bakılır.
+    Yapılmayanlar "istek (kanıt)" listesi olarak döner; model hata verirse boş liste (görev bu yüzden takılmasın)."""
+    icerik = (f"GÖREV: {gorev_metni}\n\nNOTLAR:\n" + ("\n".join(f"- {n['metin']}" for n in notlar) or "(yok)")
+              + "\n\nSON ADIMLAR:\n" + ("\n".join(list(adimlar)[-20:]) or "(yok)") + f"\n\nSONDA'NIN ÖZETİ: {sonuc or '(yok)'}")
+    try:
+        yanit = saglayici.sohbet(model, [
+            {"role": "system", "content": KONTROL_PROMPTU.format(tarih=bugun())},
+            {"role": "user", "content": icerik}], json=True, dusun=True, secenekler=JSON_SECENEKLERI)
+        veri = json.loads(yanit.metin)
+    except Exception:
+        return []
+    maddeler = veri.get("maddeler") if isinstance(veri, dict) else None
+    eksik = []
+    for m in maddeler if isinstance(maddeler, list) else []:
+        if isinstance(m, dict) and m.get("yapildi") is False and str(m.get("istek") or "").strip():
+            kanit = str(m.get("kanit") or "").strip()
+            eksik.append(str(m["istek"]).strip()[:120] + (f" ({kanit[:120]})" if kanit else ""))
+    return eksik[:5]
 
 
 def ilerleme_degerlendir(model, gorev_metni, derinlik, notlar, hafiza_):

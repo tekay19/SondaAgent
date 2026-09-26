@@ -109,6 +109,28 @@ def test_sonuc_kullanicinin_istedigi_bicime_uyar(model):
     assert all(p in cevap for p in ("703", "744", "667", "696", "702"))
 
 
+def test_gorev_kontrolu_eksik_adimi_bulur(model):
+    """Canlı Trendyol sepet testi: 'adedi 2 yap, toplamı not et, sonra 1'e düşür' görevinde son adım yapılmadan
+    bitirilmemeli; yapılınca ya da yapılamamanın geçerli nedeni not edilince eksik kalmamalı."""
+    g = ("Trendyol sepetimdeki Xiaomi powerbank'in adedini 2 yap ve sepet toplamının kaç TL olduğunu not et; sonra "
+         "adedi yeniden 1'e düşür.")
+    notlar = [{"metin": "Adet 2 yapıldığında sepet toplamı 2.998 TL", "url": "https://www.trendyol.com/sepetim",
+               "baslik": "Sepetim"}]
+    adimlar = ["1. trendyol.com açıldı", "2. “Ürün adedi arttırma” tıklandı", "3. not: Adet 2 iken toplam 2.998 TL"]
+    eksik = gorev.karar.gorev_kontrolu(model, g, notlar, adimlar, "Adet 2 yapıldı, toplam 2.998 TL")
+    print(f"\n{model}: {eksik}")
+    assert eksik and any("1" in e for e in eksik)
+    adimlar.append("4. “Ürün adedi azaltma” tıklandı")
+    notlar.append({"metin": "Adet yeniden 1 oldu, toplam 1.499 TL", "url": "https://www.trendyol.com/sepetim",
+                   "baslik": "Sepetim"})
+    assert gorev.karar.gorev_kontrolu(model, g, notlar, adimlar, "Adet 2 yapılıp toplam not edildi, sonra 1'e düşürüldü") == []
+    booking = "Booking.com'da Ankara'da Kızılay'a 1 km mesafede 3 otel bul ve tabloya koy."
+    engel = [{"metin": "Booking.com Türkiye'den bağlananlara Türkiye'deki tesisleri listelemiyor (mahkeme kararı); "
+                       "Ankara'da otel gösterilmedi", "url": "https://www.booking.com/", "baslik": "Booking.com"}]
+    assert gorev.karar.gorev_kontrolu(model, booking, engel, ["1. booking.com açıldı", "2. Ankara arandı"],
+                                      "Booking Türkiye'deki otelleri göstermiyor") == []
+
+
 def test_derin_arastirma(model, monkeypatch):
     """Gerçek hata: derin moddaki sistem-yalnız çağrılar Gemini'de 'contents are required' veriyordu."""
     from sonda import asistan
