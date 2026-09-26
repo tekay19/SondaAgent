@@ -2,6 +2,7 @@ import functools
 import http.server
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,17 @@ SAYFALAR = Path(__file__).resolve().parent / "sayfalar"
 class _SessizIsleyici(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *a):
         pass
+
+    def do_GET(self):
+        # /yavas/<ms>/<yol>: yavaş sunucu (Heroku gibi); bekleyip asıl sayfaya yönlendirir
+        if self.path.startswith("/yavas/"):
+            _, _, ms, yol = self.path.split("/", 3)
+            time.sleep(int(ms) / 1000)
+            self.send_response(302)
+            self.send_header("Location", "/" + yol)
+            self.end_headers()
+            return
+        super().do_GET()
 
 
 @pytest.fixture(scope="session")

@@ -240,6 +240,31 @@ def test_zaman_asimli_tiklama_tekrarlanmaz(tarayici, site):
     assert tarayici.sayfa.evaluate("localStorage.getItem('tik')") == "1"
 
 
+# ---- Yavaş sunucu (Heroku gibi): tıklama/Enter sonrası bak() yeni sayfayı bekler; eski sayfayı okursa model aynı
+# butona yeniden basar ("Sepete Ekle"de çift işlem). Canlı testte kullanıcının Chrome'unda Logout iki kez basılmıştı.
+def test_yavas_sunucuda_tiklamadan_sonra_yeni_sayfa_beklenir(tarayici, site):
+    tarayici.git(f"{site}/yavas_link.html")
+    tarayici.tikla(bul(tarayici.bak(), "Çıkış")["no"])
+    s = tarayici.bak()
+    assert s["url"].endswith("/cikis.html") and "Çıkış yapıldı" in s["metin"]
+
+
+def test_yavas_sunucuda_aramada_enterdan_sonra_sonuc_beklenir(tarayici, site):
+    tarayici.git(f"{site}/yavas_link.html")
+    tarayici.yaz(bul(tarayici.bak(), "Ara")["no"], "deneme", enter=True)
+    s = tarayici.bak()
+    assert s["url"].endswith("/cikis.html?q=deneme") and "Çıkış yapıldı" in s["metin"]
+
+
+def test_tiklamanin_baslattigi_istek_bitince_sayfa_okunur(tarayici, site):
+    """Canlı Trendyol testi: "+" sonrası sepet arka planda güncellenirken sayfa okundu, adet hâlâ 1 görününce model
+    yeniden bastı (ikinci tıklama tutsaydı adet 3 olurdu)."""
+    tarayici.git(f"{site}/adet.html")
+    tarayici.tikla(bul(tarayici.bak(), "Ürün adedi arttırma")["no"])
+    s = tarayici.bak()
+    assert bul(s, "Ürün adedi")["deger"] == "2" and "Toplam: 2998 TL" in s["metin"]
+
+
 # ---- Final inceleme I5: captcha kılığındaki çerçeve altındaki butona tıklatamaz
 def test_sahte_captcha_cercevesi_tiklatamaz(tarayici, site):
     from conftest import ihlaller

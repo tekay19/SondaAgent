@@ -1,4 +1,6 @@
 """Tek bir sekmenin kontrolü: bak, tıkla, yaz, kaydır... Güvenlik kararları koruma.py'dedir; burası uygular."""
+import time
+from contextlib import contextmanager
 from urllib.parse import urlparse
 
 import trafilatura
@@ -19,6 +21,7 @@ def captcha_adresi_mi(url):
 
 
 ZAMAN_ASIMI = 20000
+YATIS_SINIRI = 4  # sn: tıklamanın başlattığı arka plan isteklerini en çok bu kadar bekle
 
 
 class TiklamaEngeli(Exception):
@@ -71,7 +74,7 @@ class Tarayici:
         except Exception:
             return ""
 
-    def _bekle(self):
+    def _bekle(self, bekleyen=None):
         try:
             self.sayfa.wait_for_load_state("domcontentloaded", timeout=ZAMAN_ASIMI)
         except SekmeKapandi:
@@ -80,10 +83,43 @@ class Tarayici:
             pass
         try:
             self.sayfa.wait_for_timeout(700)  # JS ile çizilen içerik için kısa pay
+            if bekleyen:
+                self._istekleri_bekle(bekleyen)
         except SekmeKapandi:
             raise
         except Exception:
             pass  # açılır pencere bu arada kapandıysa sonraki erişimde önceki sekmeye dönülür
+
+    @contextmanager
+    def _istekler(self):
+        """Bu blokta başlayan ve henüz bitmemiş XHR/fetch istekleri (sepet adedi, filtre gibi arka plan güncellemeleri)."""
+        sayfa, bekleyen = self.sayfa, set()
+
+        def basladi(istek):
+            if istek.resource_type in ("xhr", "fetch"):
+                bekleyen.add(istek)
+
+        def bitti(istek):
+            bekleyen.discard(istek)
+        olaylar = (("request", basladi), ("requestfinished", bitti), ("requestfailed", bitti))
+        for ad, f in olaylar:
+            sayfa.on(ad, f)
+        try:
+            yield bekleyen
+        finally:
+            for ad, f in olaylar:
+                sayfa.remove_listener(ad, f)
+
+    def _istekleri_bekle(self, bekleyen):
+        """Tıklamanın başlattığı istekler bitene kadar bekler (en çok YATIS_SINIRI sn); yönlendirme ya da zincirleme
+        istek için kısa bir pay daha verir. Yoksa model güncellenmemiş sayfayı görüp aynı butona yeniden basar."""
+        son = time.monotonic() + YATIS_SINIRI
+        while time.monotonic() < son:
+            if not bekleyen:
+                self.sayfa.wait_for_timeout(300)  # cevap çizilsin; yeni istek başladıysa onu da bekle
+                if not bekleyen:
+                    return
+            self.sayfa.wait_for_timeout(100)
 
     def _loc(self, no):
         # .first yok: aynı numarayı taşıyan ikinci bir öğe (gölge DOM tuzağı) varsa Playwright işlemi reddeder
@@ -200,25 +236,26 @@ class Tarayici:
     def tikla(self, no):
         loc = self._loc(no)
         loc.evaluate("e => { const a = e.closest('a'); if (a && a.target) a.removeAttribute('target'); }")
-        try:
-            loc.click(timeout=4000, no_wait_after=True)
-        except Exception:
-            # Upwork'te görülen zaman aşımı: çoğunlukla üstte çerez bildirimi/pop-up vardır; modele nedenini söyle
+        with self._istekler() as bekleyen:
             try:
-                engel = loc.evaluate(ENGEL, timeout=3000)
+                loc.click(timeout=4000, no_wait_after=True)
             except Exception:
-                engel = None
-            if engel:
-                raise TiklamaEngeli(f"Tıklanacak öğenin üstünde başka bir öğe var: “{engel}”. Önce onu kapat "
-                                    "(ör. çerezleri kabul et / pop-up'ı kapat) ya da sayfayı kaydır.") from None
-            # Kör yeniden tıklama yok: tıklama olmuş da olabilir, ya da öğe değişmiş olabilir (koruma yeniden bakmalı)
-            try:
-                loc.scroll_into_view_if_needed(timeout=2000)
-            except Exception:
-                pass
-            raise RuntimeError("Tıklama zaman aşımına uğradı (tıklanmış da olabilir). Sayfanın yeni haline bak; "
-                               "gerekirse öğeyi yeniden seçip tekrar dene.") from None
-        self._bekle()
+                # Upwork'te görülen zaman aşımı: çoğunlukla üstte çerez bildirimi/pop-up vardır; modele nedenini söyle
+                try:
+                    engel = loc.evaluate(ENGEL, timeout=3000)
+                except Exception:
+                    engel = None
+                if engel:
+                    raise TiklamaEngeli(f"Tıklanacak öğenin üstünde başka bir öğe var: “{engel}”. Önce onu kapat "
+                                        "(ör. çerezleri kabul et / pop-up'ı kapat) ya da sayfayı kaydır.") from None
+                # Kör yeniden tıklama yok: tıklama olmuş da olabilir, ya da öğe değişmiş olabilir (koruma yeniden bakmalı)
+                try:
+                    loc.scroll_into_view_if_needed(timeout=2000)
+                except Exception:
+                    pass
+                raise RuntimeError("Tıklama zaman aşımına uğradı (tıklanmış da olabilir). Sayfanın yeni haline bak; "
+                                   "gerekirse öğeyi yeniden seçip tekrar dene.") from None
+            self._bekle(bekleyen)
 
     def yaz(self, no, metin, enter=False):
         loc = self._loc(no)
@@ -229,11 +266,12 @@ class Tarayici:
 
     def sec(self, no, deger):
         loc = self._loc(no)
-        try:
-            loc.select_option(label=str(deger), timeout=5000)
-        except Exception:
-            loc.select_option(value=str(deger), timeout=5000)
-        self._bekle()
+        with self._istekler() as bekleyen:
+            try:
+                loc.select_option(label=str(deger), timeout=5000)
+            except Exception:
+                loc.select_option(value=str(deger), timeout=5000)
+            self._bekle(bekleyen)
 
     def kaydir(self, yon="asagi"):
         self.sayfa.mouse.wheel(0, -700 if yon == "yukari" else 700)
