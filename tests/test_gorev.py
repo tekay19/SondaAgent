@@ -1236,6 +1236,18 @@ def test_serbest_modda_satin_al_yine_kullaniciya_kalir(sahte, yerel_tarayici_ac,
     isinde(kayit["t"]._kapat_asil)
 
 
+def test_serbest_modda_kart_alanli_sayfada_formsuz_onayla_kullaniciya_kalir(sahte, yerel_tarayici_ac, site):
+    """Adres ödeme adresine benzemese de sayfada kart güvenlik kodu varsa "Onayla" kayıtlı kartla ödeyebilir."""
+    kayit = {}
+    m = sahte([{"eylem": "git", "url": f"{site}/magaza/onay.html"}, {"eylem": "tikla", "no": None}])
+    _tikla_metin(m, "Onayla")
+    o = calistir(yerel_tarayici_ac, komutlar=["durdur"], kayit=kayit, serbest=True)
+    assert any(x["tur"] == "adim" and x["tip"] == "engel" for x in o)
+    assert "kullaniciya" in turler(o)
+    assert isinde(ihlaller, kayit["t"]) == []  # butona basılmadı
+    isinde(kayit["t"]._kapat_asil)
+
+
 def test_serbest_kurali_sistem_istemine_girer(monkeypatch):
     sistemler = []
     def sohbet(model, mesajlar, **k):

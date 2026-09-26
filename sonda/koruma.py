@@ -37,16 +37,22 @@ _YASAK_BUTON = re.compile(
     r"|accept (the )?offer|\bhire\b|\bise al|\bbagis|donate|transfer et|havale|\beft\b|para gonder|send money")
 # Serbest modda da kullanıcıya kalan butonlar: para harcatır ya da hesabı geri dönülmez şekilde kapatır
 _PARA_BUTON = re.compile(
-    r"\bode\b|\bodeme(yi)? (yap|tamamla|onayla)|\bodemeye gec|satin al|hemen al|simdi al|alisverisi tamamla"
-    r"|\bsiparis\w* (ver|onayla|tamamla)|hesab\w* (kapat|sil)|abone ol|subscribe"
+    r"\bode\b|\bodeme\w* (yap|tamamla|onayla|gonder|gerceklestir)|\bodemeye gec|satin al|hemen al|simdi al"
+    r"|alisverisi tamamla|\bsiparis\w* (ver|onayla|tamamla)|hesa(p|b\w*) (\w+ ){0,2}(kapat|sil|dondur)|abone ol|subscribe"
     r"|\bpay\b|\bbuy\b|purchase|place (your )?order|\bcheck ?out\b|\border now\b|\bbook now\b"
     r"|\b(complete|confirm|submit) (my |your )?(order|purchase|booking|payment)"
-    r"|(delete|close|deactivate) (my |your |the )?account|rezervasyon\w* (yap|tamamla|onayla)|\bodeme\w* (devam|gec)"
-    r"|teklif\w* kabul|accept (the )?offer|\bhire\b|\bise al|\bbagis|donate|transfer et|havale|\beft\b"
-    r"|para gonder|send money")
+    r"|(delete|close|deactivate|terminate|cancel) (\w+ ){0,3}account|rezervasyon\w* (yap|tamamla|onayla)"
+    r"|\bodeme\w* (devam|gec)|teklif\w* kabul|accept (the )?offer|\bhire\b|\bise al|\bbagis|donate|havale|\beft\b"
+    r"|\bpara\w* (gonder|yatir|cek|transfer)|transfer\w* (et|yap|onayla|gonder|tamamla)|\btransfer (money|funds|now)"
+    r"|(send|make|submit|confirm|complete|authorize) (a |the |my |your )?(payment|transfer)|send money|\bwithdraw"
+    r"|add funds|top up|bakiye yukle|place (your |a )?bid|confirm (your )?bid|\bbid now\b"
+    r"|deneme\w* baslat|start (my |your |the |a )?(free )?trial|\bkirala\b|\brent (now|for)\b")
 # Ödeme/sipariş sayfalarında "Devam/Continue" da son adım olabilir (kayıtlı kartla tek tık sipariş)
 _ODEME_ADRESI = re.compile(r"checkout|/odeme|/payment|/buy/|/siparis|place-?order|/sepet/onay|/cart/confirm", re.I)
 _DEVAM = re.compile(r"(devam( et)?|continue|ileri|next|proceed( to [a-z ]+)?)")
+# Stripe gibi çerçeve (iframe) içindeki kart alanları öğe listesine girmez; etiketleri sayfa metnindedir
+_KART_METNI = re.compile(r"kart numara|card number|card information|\bcvv\b|\bcvc\b|son kullanma tarihi"
+                         r"|expiration date|expiry date")
 
 _ALAN_ADI = re.compile(r"(?<![@\w.-])((?:[a-z0-9-]+\.)+[a-z]{2,})")
 _UZANTILAR = {"com", "net", "org", "tr", "io", "co", "ai", "dev", "app", "gov", "edu", "info", "biz", "me", "uk", "de",
@@ -255,8 +261,19 @@ def _submit_mu(oge):
            (oge.get("etiket") == "input" and oge.get("tip") in ("submit", "image"))
 
 
-def kontrol(eylem, oge=None, form_ogeleri=(), gorev_metni="", url="", gizliler=(), serbest=False):
-    """serbest: kullanıcı bu görev için son adım butonlarına basma izni verdi (para ve hesap silme hariç)."""
+def odeme_sayfasi(url, sayfa=None):
+    """Adres ödeme adresi mi, ya da sayfada kart/IBAN/doğrulama kodu alanı veya kart bilgisi etiketi var mı?
+    Böyle bir sayfada "Onayla/Devam" parayı çekebilir. Düz şifre alanı (giriş sayfası) sayılmaz."""
+    if _ODEME_ADRESI.search(url or ""):
+        return True
+    sayfa = sayfa or {}
+    return any(hassas_alan(f) and not _sifre_alani(f) for f in sayfa.get("ogeler", ())) \
+        or bool(_KART_METNI.search(sade(sayfa.get("metin"))))
+
+
+def kontrol(eylem, oge=None, form_ogeleri=(), gorev_metni="", url="", gizliler=(), serbest=False, sayfa=None):
+    """serbest: kullanıcı bu görev için son adım butonlarına basma izni verdi (para, hesap silme ve ödeme
+    sayfaları hariç). sayfa: {"ogeler", "metin"}; ödeme sayfasını adresten ayrı tanımak için."""
     ad = eylem.get("eylem")
     gizli = set(gizliler) | gizli_adaylar(gorev_metni)
     if ad == "git":
@@ -281,9 +298,10 @@ def kontrol(eylem, oge=None, form_ogeleri=(), gorev_metni="", url="", gizliler=(
         metin = sade(" ".join(str(oge.get(k) or "") for k in ("metin", "deger", "aria", "baslik")))
         if kimlik and _GIRIS_BUTONU.search(metin) and not _YASAK_BUTON.search(_GIRIS_BUTONU.sub(" ", metin)):
             return Karar(True)
-        if para_butonu(oge) or (yasak_buton(oge) and not serbest):
+        odemede = odeme_sayfasi(url, sayfa)
+        if para_butonu(oge) or (yasak_buton(oge) and (not serbest or odemede)):
             return Karar(False, f"🔒 “{oge_adi(oge)}” son adım butonu. Kontrol edip buna sen basmalısın.")
-        if _ODEME_ADRESI.search(url or "") and (_submit_mu(oge) or _DEVAM.fullmatch(sade(oge_adi(oge)))):
+        if odemede and (_submit_mu(oge) or _DEVAM.fullmatch(sade(oge_adi(oge)))):
             return Karar(False, f"🔒 Ödeme sayfasında “{oge_adi(oge)}” siparişi tamamlayabilir. Bu adım senin.")
         hassaslar = [f for f in form_ogeleri if hassas_alan(f)]
         if _submit_mu(oge) and hassaslar and not (kimlik and all(_sifre_alani(f) for f in hassaslar)):

@@ -412,9 +412,57 @@ def test_serbest_modda_son_adim_butonlari_izinli(metin):
     "Pay now", "Buy now", "Purchase", "Place order", "Place your order", "Checkout", "Subscribe", "Confirm payment",
     "Complete purchase", "Delete account", "Delete my account", "Close account", "Hire", "Hire now", "Teklifi kabul et",
     "Accept offer", "Bağış yap", "Donate", "Havale yap", "Para gönder", "Send money", "Book now",
+    # para gönderme/çekme ve hesap kapatmanın başka söylenişleri (26 Eylül testinde serbest modda geçiyordu)
+    "Ödemeyi Gönder", "Parayı Gönder", "Para Yatır", "Para Çek", "Transferi Onayla", "Send payment now",
+    "Make a payment", "Confirm transfer", "Transfer money", "Withdraw", "Add funds", "Bakiye Yükle", "Hesap Sil",
+    "Hesap Kapat", "Hesabımı kalıcı olarak sil", "Delete your LinkedIn account", "Place bid", "Confirm bid",
+    "Ücretsiz denemeyi başlat", "Start free trial", "Kirala", "Rent for $3.99",
 ])
 def test_serbest_modda_para_ve_hesap_silme_butonlari_yine_engellenir(metin):
     assert not koruma.kontrol({"eylem": "tikla", "no": 1}, buton(metin), serbest=True).izin, metin
+
+
+@pytest.mark.parametrize("metin", ["Ödeme yöntemleri", "Payment methods", "Hesap ayarları", "Sepete Ekle",
+                                   "Favorilere Ekle", "Siparişlerim", "Kaydet"])
+def test_para_kurali_para_sayfalarina_giden_zararsiz_butonlari_engellemez(metin):
+    assert koruma.kontrol({"eylem": "tikla", "no": 1}, buton(metin)).izin, metin
+
+
+@pytest.mark.parametrize("metin", ["Onayla", "Confirm", "Gönder", "Submit", "Devam"])
+def test_serbest_modda_odeme_adresinde_form_disi_son_adim_butonu_engellenir(metin):
+    """SPA ödeme sayfalarında buton çoğu zaman form dışındadır; serbest izin ödeme sayfasında geçerli değil."""
+    k = koruma.kontrol({"eylem": "tikla", "no": 1}, buton(metin), serbest=True, url="https://www.trendyol.com/odeme")
+    assert not k.izin, metin
+
+
+@pytest.mark.parametrize("alan", [oge(ad="cardNumber"), oge(otomatik="cc-csc"), oge(metin="IBAN"),
+                                  oge(metin="SMS doğrulama kodu")])
+def test_serbest_modda_kart_ya_da_kod_alani_olan_sayfada_son_adim_butonu_engellenir(alan):
+    """Adres ödeme adresine benzemese de sayfada kart/IBAN/doğrulama kodu alanı varsa "Onayla" parayı çekebilir."""
+    k = koruma.kontrol({"eylem": "tikla", "no": 1}, buton("Onayla"), serbest=True, url="https://site.com/adim-3",
+                       sayfa={"ogeler": [alan], "metin": ""})
+    assert not k.izin
+
+
+def test_serbest_modda_kart_bilgisi_metni_olan_sayfada_son_adim_butonu_engellenir():
+    """Stripe gibi kart alanları çerçeve (iframe) içindedir, öğe listesinde görünmez; etiket metni sayfadadır."""
+    k = koruma.kontrol({"eylem": "tikla", "no": 1}, buton("Confirm"), serbest=True, url="https://app.com/upgrade",
+                       sayfa={"ogeler": [], "metin": "Plan: Pro $20/month. Card information Card number MM / YY CVC"})
+    assert not k.izin
+
+
+def test_kart_alani_olan_sayfada_devam_normal_modda_da_engellenir():
+    """Ödeme sayfası adresten tanınmasa da (kart alanı var) "Devam" kayıtlı kartla siparişi bitirebilir."""
+    k = koruma.kontrol({"eylem": "tikla", "no": 1}, buton("Devam"), url="https://site.com/adim-3",
+                       sayfa={"ogeler": [oge(ad="cardNumber")], "metin": ""})
+    assert not k.izin
+
+
+def test_serbest_modda_sifre_alani_olan_sayfa_odeme_sayfasi_sayilmaz():
+    """Giriş sayfasındaki şifre alanı para bağlamı değildir; formsuz "Onayla" serbest modda izinli kalır."""
+    k = koruma.kontrol({"eylem": "tikla", "no": 1}, buton("Onayla"), serbest=True, url="https://site.com/ayarlar",
+                       sayfa={"ogeler": [oge(tip="password", metin="Şifre")], "metin": "Kart ile ödeme seçenekleri"})
+    assert k.izin
 
 
 def test_serbest_modda_odeme_sayfasindaki_devam_yine_engellenir():

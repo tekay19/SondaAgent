@@ -245,7 +245,7 @@ def dongu(g, gorev_metni, onceki, model, t, durum, derinlik):
                     continue
             oge = bilgi["oge"]
             k = koruma.kontrol(karar, oge, bilgi["form_ogeleri"], gorev_metni=gorev_metni, url=t.url,
-                               gizliler=durum["gizli"], serbest=durum.get("serbest", False))
+                               gizliler=durum["gizli"], serbest=durum.get("serbest", False), sayfa=sayfa)
             if not k.izin:
                 t.vurgula(no)
                 yield adim("engel", k.sebep)
