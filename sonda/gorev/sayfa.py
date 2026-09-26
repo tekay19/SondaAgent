@@ -46,6 +46,34 @@ def iki_adim_mi(sayfa):
     return kod_alani and bool(_IKI_ADIM.search(metin))
 
 
+# Seçimi kesinleştiren işlemler: seçim görevinde adaylar karşılaştırılmadan yapılmasın
+_ISLEM = re.compile(r"sepete ekle|add to (cart|basket|bag)|favori|wishlist|listeye ekle|add to list|\bbasvur"
+                    r"|\bapply\b|teklif (ver|gonder)|submit (a )?proposal|rezervasyon|\breserve\b|\bbook\b")
+# Arama ve liste sayfaları aday sayılmaz (Trendyol /sr?q=, Hepsiburada /ara?q=, Amazon /s?k=, Booking searchresults)
+_ARAMA_SAYFASI = re.compile(r"[?&](q|k|s|kw|ss|query|search|keyword|keywords|searchterm|text)=|/search|/sr(\?|$)"
+                            r"|/ara(\?|$|\.html)|/arama", re.I)
+
+
+def islem_butonu(oge):
+    return bool(_ISLEM.search(koruma.sade(" ".join(str(oge.get(k) or "") for k in ("metin", "aria", "baslik", "deger")))))
+
+
+def aday_sayfalari(notlar):
+    """Not alınan aday sayfaları (ürün/ilan/otel): arama motoru, arama ve liste sayfaları hariç."""
+    return {n["url"].split("#")[0] for n in notlar
+            if not _ARAMA_MOTORU.search(n["url"]) and not _ARAMA_SAYFASI.search(n["url"])}
+
+
+def aday_uyarisi(derinlik, notlar):
+    """Seçim görevinde yeterli adayın kendi sayfası incelenmediyse modele söylenecek metin, yoksa boş metin."""
+    gerek, sayfalar = derinlik.get("min_aday") or 0, aday_sayfalari(notlar)
+    if len(sayfalar) >= gerek:
+        return ""
+    return (f"en az {gerek} adayın kendi sayfasını (ürün/ilan/otel sayfası) açıp not almalısın; şu an {len(sayfalar)} "
+            "aday sayfasından notun var (arama ve liste sayfaları sayılmaz). Her adaydan fiyat, puan, yorum sayısı, "
+            "satıcı ve satıcı puanı gibi karşılaştırmaya yarayan bilgileri not al, sonra en iyisini seç.")
+
+
 def _bos_secim(deger):
     d = koruma.sade(deger)
     return not d or d.startswith(("sec", "select", "choose", "--", "lutfen"))
@@ -164,7 +192,7 @@ class SayfaHafizasi:
         if not k:
             return ""
         parca = []
-        if k["gorulen"] < ayar.TAM_GORULDU:
+        if k["gorulen"] < ayar.TAM_GORULDU and not k.get("okundu"):  # oku: tüm metin tarandı
             parca.append(f"sayfanın sadece %{k['gorulen']}'ini gördün")
         if k["acilmamis"]:
             parca.append("açılmamış " + ", ".join(f"“{a}”" for a in k["acilmamis"]) + " butonu var")
@@ -195,6 +223,10 @@ class SayfaHafizasi:
 
     def eylem(self, url, metin):
         self._kayit(url)["eylemler"].append(metin)
+
+    def okundu(self, url):
+        """oku eylemi sayfanın tüm metnini taradı: kaydırma yüzdesi eksik sayılmaz ("daha fazla" butonları sayılır)."""
+        self._kayit(url)["okundu"] = True
 
     def not_(self, url, metin):
         self._kayit(url)["notlar"].append(metin)

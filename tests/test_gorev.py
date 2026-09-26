@@ -944,6 +944,24 @@ def test_ayni_sayfa_arka_arkaya_iki_kez_okunmaz(sahte, yerel_tarayici_ac, site):
 
 
 
+def test_okunan_uzun_sayfadaki_not_uyarilmaz_ve_bitirilebilir(sahte, yerel_tarayici_ac, site):
+    """Canlı Python 3.13 testi: 'oku' ile tamamı taranan doküman sayfası '%1 gördün' sayıldı; model aynı notu 3 kez
+    yeniden aldı ve bitirmesi iki kez reddedildi."""
+    m = sahte([{"eylem": "git", "url": f"{site}/belge.html"}, {"eylem": "oku"},
+               {"eylem": "not_al", "metin": "PEP 701 ve PEP 702 bölüm 1-2 yenilikleri"},
+               {"eylem": "bitir", "sonuc": "x"}])
+    calistir(yerel_tarayici_ac)
+    assert "Dikkat" not in m.istemler[3].split("SON EYLEMİN SONUCU:")[1].split("MEVCUT SAYFA")[0]
+    assert len(m.istemler) == 4  # bitirme reddedilmedi
+
+
+def test_okunmayan_uzun_sayfadaki_not_hala_uyarilir(sahte, yerel_tarayici_ac, site):
+    m = sahte([{"eylem": "git", "url": f"{site}/belge.html"}, {"eylem": "not_al", "metin": "PEP 701"},
+               {"eylem": "bitir", "sonuc": "x"}])
+    calistir(yerel_tarayici_ac)
+    assert "Dikkat" in m.istemler[2].split("SON EYLEMİN SONUCU:")[1].split("MEVCUT SAYFA")[0]
+
+
 # ---- Final inceleme I1: model düşünürken Durdur'a basılırsa gelen eylem uygulanmaz
 def test_karar_sirasinda_durdurulursa_eylem_uygulanmaz(sahte, yerel_tarayici_ac, site):
     m = sahte([{"eylem": "git", "url": f"{site}/giris.html"}])
@@ -1245,6 +1263,63 @@ def test_serbest_modda_kart_alanli_sayfada_formsuz_onayla_kullaniciya_kalir(saht
     assert any(x["tur"] == "adim" and x["tip"] == "engel" for x in o)
     assert "kullaniciya" in turler(o)
     assert isinde(ihlaller, kayit["t"]) == []  # butona basılmadı
+    isinde(kayit["t"]._kapat_asil)
+
+
+# ---- seçim görevleri: canlı Trendyol testinde "birkaç seçeneği karşılaştır" denmişken tek ürüne bakıp sepete ekledi
+def test_derinlik_aday_sayisi(monkeypatch):
+    monkeypatch.setattr(gorev.karar.saglayici, "sohbet",
+                        lambda *a, **k: Yanit('{"derinlik": "orta", "min_site": 1, "min_aday": 9}'))
+    assert gorev.karar.derinlik_belirle("m", "x", "")["min_aday"] == 5
+    monkeypatch.setattr(gorev.karar.saglayici, "sohbet", lambda *a, **k: Yanit('{"derinlik": "orta", "min_site": 1}'))
+    assert gorev.karar.derinlik_belirle("m", "Trendyol'da fiyat/performansı iyi bir powerbank seç", "")["min_aday"] == 3
+    assert gorev.karar.derinlik_belirle("m", "Birkaç seçeneği karşılaştırıp en iyisini sepete ekle", "")["min_aday"] == 3
+    assert gorev.karar.derinlik_belirle("m", "Merkez Bankası'ndan dolar kurunu bul", "")["min_aday"] == 0
+
+
+def test_istem_incelenecek_aday_sayisini_soyler(sahte, yerel_tarayici_ac, monkeypatch):
+    m = sahte([{"eylem": "bitir", "sonuc": "x"}])
+    monkeypatch.setattr(gorev.karar, "derinlik_belirle", lambda *a: {**DERINLIK, "min_aday": 3})
+    calistir(yerel_tarayici_ac)
+    assert "en az 3 adayın kendi sayfasını" in m.istemler[0]
+
+
+def test_secim_gorevinde_adaylar_incelenmeden_sepete_eklenmez(sahte, yerel_tarayici_ac, site, monkeypatch):
+    kayit = {}
+    m = sahte([{"eylem": "git", "url": f"{site}/magaza/urun.html?id=2"}, {"eylem": "not_al", "metin": "Kioxia 2.649 TL"},
+               {"eylem": "tikla", "no": None},  # tek adaya bakıp sepete ekleme: reddedilmeli
+               {"eylem": "git", "url": f"{site}/magaza/urun.html?id=3"}, {"eylem": "not_al", "metin": "WD 2.899 TL"},
+               {"eylem": "git", "url": f"{site}/magaza/urun.html?id=2"}, {"eylem": "tikla", "no": None},
+               {"eylem": "bitir", "sonuc": "Kioxia sepette"}])
+    monkeypatch.setattr(gorev.karar, "derinlik_belirle", lambda *a: {**DERINLIK, "min_aday": 2})
+    _tikla_metin(m, "Sepete Ekle")
+    o = calistir(yerel_tarayici_ac, kayit=kayit)
+    assert "en az 2 aday" in m.istemler[3]
+    assert len([x for x in o if x["tur"] == "adim" and x["tip"] == "tikla"]) == 1  # yalnızca ikinci tıklama
+    assert "Kioxia" in isinde(lambda: kayit["t"].sayfa.evaluate("localStorage.getItem('sepet')"))
+    isinde(kayit["t"]._kapat_asil)
+
+
+def test_secim_gorevinde_liste_notu_aday_sayilmaz_ve_bitirme_reddedilir(sahte, yerel_tarayici_ac, site, monkeypatch):
+    m = sahte([{"eylem": "git", "url": f"{site}/magaza/ara.html?q=nvme"},
+               {"eylem": "not_al", "metin": "Listede Kioxia 2.649, WD 2.899"},
+               {"eylem": "bitir", "sonuc": "erken"},
+               {"eylem": "git", "url": f"{site}/magaza/urun.html?id=2"}, {"eylem": "not_al", "metin": "Kioxia 2.649 TL"},
+               {"eylem": "git", "url": f"{site}/magaza/urun.html?id=3"}, {"eylem": "not_al", "metin": "WD 2.899 TL"},
+               {"eylem": "bitir", "sonuc": "Kioxia"}])
+    monkeypatch.setattr(gorev.karar, "derinlik_belirle", lambda *a: {**DERINLIK, "min_aday": 2})
+    calistir(yerel_tarayici_ac)
+    assert "en az 2 aday" in m.istemler[3]
+    assert len(m.istemler) == 8
+
+
+def test_secim_gorevi_olmayan_isleme_kapi_uygulanmaz(sahte, yerel_tarayici_ac, site):
+    kayit = {}
+    m = sahte([{"eylem": "git", "url": f"{site}/magaza/urun.html?id=2"}, {"eylem": "tikla", "no": None},
+               {"eylem": "bitir", "sonuc": "eklendi"}])
+    _tikla_metin(m, "Sepete Ekle")
+    calistir(yerel_tarayici_ac, kayit=kayit)
+    assert "Kioxia" in isinde(lambda: kayit["t"].sayfa.evaluate("localStorage.getItem('sepet')"))
     isinde(kayit["t"]._kapat_asil)
 
 

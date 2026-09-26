@@ -14,7 +14,7 @@ from .eylemler import adim, uygula
 from .istem import istem
 from .kayit import GorevKaydi
 from .promptlar import CAPTCHA_SEBEBI, DEVAM_METNI, IKI_ADIM_SEBEBI, IKI_ADIM_TAMAM, SONUC_PROMPTU
-from .sayfa import SayfaHafizasi, eksik_form_alanlari, iki_adim_mi
+from .sayfa import SayfaHafizasi, aday_uyarisi, eksik_form_alanlari, iki_adim_mi, islem_butonu
 
 
 class GizliListe(list):
@@ -83,7 +83,7 @@ def dongu(g, gorev_metni, onceki, model, t, durum, derinlik):
     notlar, adimlar, hafiza_ = durum["notlar"], durum["adimlar"], durum["hafiza"]
     maks = min(ayar.MAKS_ADIM, derinlik["maks_adim"])
     geri_bildirim, ekran_iste, son_imza, tekrar, bitir_red = "", False, None, 0, 0
-    yapilan, erken_red, form_red, son_mesaj = 0, False, False, ""
+    yapilan, erken_red, form_red, son_mesaj, islem_red = 0, False, False, "", 0
     captcha_denenen, son_okuma, son_imzalar = set(), None, []
     durum["gizli"].update(koruma.gizli_adaylar(gorev_metni))
     kayit = GorevKaydi(g.id, durum["gizli"])
@@ -189,6 +189,11 @@ def dongu(g, gorev_metni, onceki, model, t, durum, derinlik):
                                  + ". Başka kaynaklara da bak (gerekirse İngilizce arama yap), bulduklarını not al.")
                 adimlar.append(f"{adim_no}. bitirmek istedi, kaynak yetersiz olduğu için devam{dusunce_ek}")
                 continue
+            if (uyari := aday_uyarisi(derinlik, notlar)) and bitir_red < ayar.BITIR_RED_SINIRI and adim_no < maks - 3:
+                bitir_red += 1
+                geri_bildirim = f"Henüz bitirme: {uyari}"
+                adimlar.append(f"{adim_no}. bitirmek istedi, yeterli aday incelenmediği için devam{dusunce_ek}")
+                continue
             eksikler = hafiza_.eksik_notlu()
             if derinlik.get("inceleme"):
                 eksikler += [x for x in hafiza_.eksik_ziyaret() if x not in eksikler]
@@ -252,6 +257,12 @@ def dongu(g, gorev_metni, onceki, model, t, durum, derinlik):
                 adimlar.append(f"{adim_no}. {e} “{koruma.oge_adi(oge)}” -> ENGELLENDİ, kullanıcıya bırakıldı")
                 hafiza_.eylem(t.url, f"“{koruma.oge_adi(oge)}” kullanıcıya bırakıldı")
                 sebep = k.sebep
+            elif e == "tikla" and islem_red < ayar.BITIR_RED_SINIRI and islem_butonu(oge) \
+                    and (uyari := aday_uyarisi(derinlik, notlar)):
+                islem_red += 1  # seçim görevinde karşılaştırmadan sepete ekleme/favori/başvuru yapılmaz
+                geri_bildirim = f"Önce seçenekleri karşılaştır: {uyari} “{koruma.oge_adi(oge)}” işlemini seçimden sonra yap."
+                adimlar.append(f"{adim_no}. “{koruma.oge_adi(oge)}” -> aday karşılaştırması bitmeden yapılmadı{dusunce_ek}")
+                continue
             karar["enter_izni"] = k.enter
         elif not sebep and e == "git":
             if koruma.YER_TUTUCU.search(str(karar.get("url") or "")):
@@ -324,10 +335,14 @@ def dongu(g, gorev_metni, onceki, model, t, durum, derinlik):
         if e == "not_al":
             hafiza_.not_(onceki_url, str(karar["metin"])[:200])
             if eksik := hafiza_.eksik(onceki_url):
-                geri_bildirim += (f" Dikkat: {eksik}; not aldığın bilgi eksik olabilir (ör. daha ucuz ya da daha "
-                                  "iyi seçenek aşağıda olabilir). Kaydırıp/açıp kontrol et, gerekirse notu düzelt.")
+                geri_bildirim += (f" Dikkat: {eksik}; not aldığın bilgi eksik olabilir (aşağıda daha iyi bir seçenek "
+                                  "ya da eksik bilgi olabilir). Aynı notu yeniden alma: önce kaydır (uzun metinde oku), "
+                                  "'daha fazla' butonlarını aç; yeni bilgi bulursan onu not al.")
         elif e == "kaydir":
             hafiza_.eylem(onceki_url, "kaydırıldı")
+        elif e == "oku":
+            hafiza_.okundu(onceki_url)
+            hafiza_.eylem(onceki_url, olay["metin"][:80])
         elif e != "git":
             hafiza_.eylem(onceki_url, olay["metin"][:80])
     durum["kod"], durum["hal"] = "adim_siniri", f"Adım sınırı ({maks}) doldu; görev yarım kalmış olabilir."

@@ -9,7 +9,9 @@ def istem(gorev_metni, onceki, derinlik, notlar, hafiza_, adimlar, sayfa, geri_b
     if onceki:
         p.append(f"ÖNCEKİ KONUŞMA (bağlam):\n{onceki}")
     plan = "\n".join(f"{i}. {a}" for i, a in enumerate(derinlik["plan"], 1)) or "(plan yok)"
-    p.append(f"PLANIN ({derinlik['derinlik']} görev, en az {derinlik['min_site']} farklı siteden bilgi topla):\n{plan}")
+    aday = (f", seçmeden önce en az {derinlik['min_aday']} adayın kendi sayfasını açıp karşılaştır"
+            if derinlik.get("min_aday") else "")
+    p.append(f"PLANIN ({derinlik['derinlik']} görev, en az {derinlik['min_site']} farklı siteden bilgi topla{aday}):\n{plan}")
     p.append(f"ADIM: {adim_no}/{maks}")
     p.append("NOTLARIN:\n" + ("\n".join(f"- {n['metin']} ({alan_adi(n['url'])})" for n in notlar) or "(henüz yok)"))
     p.append("ZİYARET EDİLEN SAYFALAR (görev boyunca hafızan):\n" + hafiza_.metin())

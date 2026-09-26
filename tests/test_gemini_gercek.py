@@ -91,6 +91,24 @@ def test_serbest_modda_formu_kendisi_gonderir(model, yerel_tarayici_ac, site):
     assert any(i["tur"] == "gonderme" for i in kayitlar)
 
 
+def test_sonuc_kullanicinin_istedigi_bicime_uyar(model):
+    """Canlı Python 3.13 testi: "5 yeniliği birer cümleyle özetle" denmişti; görev 'incele' dediği için inceleme
+    biçimi uygulandı ve cevaba istenmeyen güçlü/zayıf yönler bölümü eklendi."""
+    from sonda.gorev.sayfa import SayfaHafizasi
+    notlar = [{"metin": "PEP 703 free-threaded CPython (GIL kapatılabilir, deneysel); PEP 744 deneysel JIT derleyici; "
+                        "PEP 667 locals() semantiği; PEP 696 tip parametresi varsayılanları; PEP 702 warnings.deprecated",
+               "url": "https://docs.python.org/3/whatsnew/3.13.html", "baslik": "What's New In Python 3.13"}]
+    durum = {"notlar": notlar, "adimlar": [], "hafiza": SayfaHafizasi(), "sonuc": "5 yenilik bulundu",
+             "hal": "Görev tamamlandı.", "gizli": set(), "derinlik": {"derinlik": "derin", "inceleme": True}}
+    gorev_metni = ("Python'un resmi dokümantasyonundaki 'What's New In Python 3.13' sayfasını incele. En önemli 5 "
+                   "yeniliği birer cümleyle Türkçe özetle ve her birinin PEP numarasını yaz.")
+    cevap = "".join(o["metin"] for o in gorev.dongu.sonuc_yaz(model, gorev_metni, durum) if o["tur"] == "token")
+    print(f"\n{model}:\n{cevap}")
+    kucuk = cevap.lower()
+    assert "güçlü" not in kucuk and "zayıf" not in kucuk
+    assert all(p in cevap for p in ("703", "744", "667", "696", "702"))
+
+
 def test_derin_arastirma(model, monkeypatch):
     """Gerçek hata: derin moddaki sistem-yalnız çağrılar Gemini'de 'contents are required' veriyordu."""
     from sonda import asistan

@@ -1,7 +1,8 @@
 """Modelden karar alma: görevin derinliği/planı ve her adımdaki tek eylem (JSON)."""
 import json
+import re
 
-from .. import hafiza
+from .. import hafiza, koruma
 from .. import model as saglayici
 from ..ortak import JSON_SECENEKLERI, bugun
 from . import ayar
@@ -46,6 +47,11 @@ def karar_al(model, istem, ekran=None, dusun=False, serbest=False):
     return None
 
 
+# Seçim görevi: model min_aday vermese de bu sözler adaylar tek tek incelenmeden seçilmesin diye en az 3 aday ister
+_SECIM = re.compile(r"en iyi|en uygun|fiyat ?/? ?performans|\bf/?p\b|birkac secene(k|g)|secenekleri karsilastir"
+                    r"|karsilastirip|\boner|alternatif|hangisini|\bbest\b|recommend")
+
+
 def derinlik_belirle(model, gorev_metni, onceki):
     """Görevin ne kadar derin araştırılacağını ve planını modele sorar; hatalı cevabı düzeltir."""
     try:
@@ -63,10 +69,16 @@ def derinlik_belirle(model, gorev_metni, onceki):
         min_site = int(veri.get("min_site", 2))
     except (TypeError, ValueError):
         min_site = 2
+    try:
+        min_aday = max(0, min(5, int(veri.get("min_aday", 0))))
+    except (TypeError, ValueError):
+        min_aday = 0
+    if not min_aday and _SECIM.search(koruma.sade(gorev_metni)):
+        min_aday = 3
     plan = veri.get("plan") if isinstance(veri.get("plan"), list) else []
     plan = [a.strip() for a in plan if isinstance(a, str) and a.strip()][:6]
     return {"derinlik": derinlik, "min_site": max(1, min(5, min_site)), "inceleme": veri.get("inceleme") is True,
-            "maks_adim": min(ayar.MAKS_ADIM, ayar.ADIM_SINIRI[derinlik]), "plan": plan}
+            "maks_adim": min(ayar.MAKS_ADIM, ayar.ADIM_SINIRI[derinlik]), "plan": plan, "min_aday": min_aday}
 
 
 def ilerleme_degerlendir(model, gorev_metni, derinlik, notlar, hafiza_):
