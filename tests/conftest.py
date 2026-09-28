@@ -103,3 +103,13 @@ def _test_captcha_ana_makinesi():
     sayfa.CAPTCHA_SUNUCULARI["localhost"] = "/captcha"
     yield
     sayfa.CAPTCHA_SUNUCULARI.pop("localhost", None)
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _gecici_belgeler(tmp_path_factory):
+    """Yüklenen belgeler testlerde geçici klasöre yazılır (gerçek veri/belgeler kirlenmesin)."""
+    from sonda import belge
+    eski = belge.KLASOR
+    belge.KLASOR = tmp_path_factory.mktemp("belgeler")
+    yield
+    belge.KLASOR = eski
