@@ -660,7 +660,8 @@ def test_derinlik_promptu_mevcut_oturumu_bilir():
 
 
 def test_tiklama_engeli_modele_neden_olarak_doner(sahte, yerel_tarayici_ac, site):
-    m = sahte([{"eylem": "git", "url": f"{site}/engel.html"}])
+    # Çerez penceresi artık kendiliğinden onaylanır; çerezle ilgisiz örtü (üyelik teklifi) modele engel olarak döner
+    m = sahte([{"eylem": "git", "url": f"{site}/kabul_tuzak.html"}])
     asil = m.__call__
 
     def akilli(model, istem, ekran=None, dusun=False, serbest=False):
@@ -672,7 +673,7 @@ def test_tiklama_engeli_modele_neden_olarak_doner(sahte, yerel_tarayici_ac, site
     gorev.karar.karar_al = akilli
     calistir(yerel_tarayici_ac)
     geri = m.istemler[2].split("SON EYLEMİN SONUCU:")[1][:400]
-    assert "Tümünü kabul et" in geri or "çerez" in geri
+    assert "üstünde başka bir öğe" in geri  # engel ve üstteki pencerenin metni modele döner (basılmaz: test_tarayici)
 
 
 def test_captcha_eylemi_onay_kutusunu_isaretler(sahte, yerel_tarayici_ac, site):
