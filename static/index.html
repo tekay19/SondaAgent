@@ -122,8 +122,9 @@ svg.ik { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none
 .sil-onay button.tehlike { background: var(--hata); color: #fff; }
 .gecmis-bos { color: var(--soluk); font-size: 13.5px; padding: 16px 8px; }
 .kenar-alt { border-top: 1px solid var(--cizgi); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
-.tema-sec { display: flex; background: var(--yuzey-2); border-radius: 9px; padding: 3px; }
-.tema-sec button { flex: 1; border: 0; background: none; border-radius: 7px; padding: 5px; font-size: 13px; color: var(--soluk); display: flex; align-items: center; justify-content: center; gap: 6px; }
+.tema-sec { display: flex; gap: 2px; align-self: flex-end; background: var(--yuzey-2); border-radius: 999px; padding: 3px; }
+.tema-sec button { width: 30px; height: 26px; border: 0; background: none; border-radius: 999px; color: var(--soluk); display: grid; place-items: center; transition: color .15s, background .15s; }
+.tema-sec button:hover { color: var(--metin); }
 .tema-sec button svg { width: 15px; height: 15px; }
 .tema-sec button[aria-pressed="true"] { background: var(--yuzey); color: var(--metin); box-shadow: var(--golge); }
 
@@ -372,10 +373,6 @@ svg.ik { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none
 .alta-in svg { width: 18px; height: 18px; }
 
 /* durum ve bildirim */
-.durum { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--soluk); padding: 0 4px; }
-.durum i { width: 8px; height: 8px; border-radius: 50%; background: var(--soluk); }
-.durum.acik i { background: #2FB380; box-shadow: 0 0 0 3px color-mix(in srgb, #2FB380 20%, transparent); }
-.durum.kapali i { background: var(--hata); }
 .bildirim {
   position: fixed; left: 50%; bottom: 28px; transform: translate(-50%, 20px); opacity: 0; pointer-events: none;
   background: var(--metin); color: var(--zemin); padding: 9px 16px; border-radius: 10px; font-size: 14px; z-index: 50;
@@ -536,11 +533,10 @@ svg.ik { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none
     <button class="yeni-btn hafiza-btn" id="ayarlar-ac"><svg class="ik"><use href="#i-ayar"/></svg>Ayarlar</button>
     <nav class="gecmis" id="gecmis"></nav>
     <div class="kenar-alt">
-      <div class="durum" id="durum" role="status"><i></i><span>Bağlantı kontrol ediliyor</span></div>
       <div class="tema-sec" role="group" aria-label="Tema">
-        <button data-tema="light" title="Açık"><svg class="ik"><use href="#i-gunes"/></svg>Açık</button>
-        <button data-tema="dark" title="Koyu"><svg class="ik"><use href="#i-ay"/></svg>Koyu</button>
-        <button data-tema="system" title="Sistem"><svg class="ik"><use href="#i-ekran"/></svg>Sistem</button>
+        <button data-tema="light" title="Açık tema" aria-label="Açık tema"><svg class="ik"><use href="#i-gunes"/></svg></button>
+        <button data-tema="dark" title="Koyu tema" aria-label="Koyu tema"><svg class="ik"><use href="#i-ay"/></svg></button>
+        <button data-tema="system" title="Sistem teması" aria-label="Sistem teması"><svg class="ik"><use href="#i-ekran"/></svg></button>
       </div>
     </div>
   </aside>
@@ -1206,18 +1202,6 @@ $("#cekmece-govde").addEventListener("click", async e => {
 });
 hafizaCiz();
 
-// ---------- bağlantı durumu
-async function durumKontrol() {
-  const el = $("#durum");
-  try {
-    const d = await (await fetch("/api/durum")).json();
-    el.className = "durum " + (d.ollama ? "acik" : "kapali");
-    el.querySelector("span").textContent = d.ollama ? "Yerel model hazır" : "Ollama çalışmıyor, Ollama'yı başlat";
-  } catch {
-    el.className = "durum kapali"; el.querySelector("span").textContent = "Sonda sunucusu kapalı";
-  }
-}
-durumKontrol(); setInterval(durumKontrol, 15000);
 
 // ---------- başlangıç
 modSec(S.mod); kutuDurumu(); yeniSohbet();

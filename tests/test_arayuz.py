@@ -299,3 +299,14 @@ def test_belge_yuklenirken_gonderilmez_bitince_belgeyle_gider(arayuz, tmp_path):
         s.press("#soru", "Enter")
     assert len(istek.value.post_data_json["belgeler"]) == 1
     s.close()
+
+
+def test_kenar_alt_sade_durum_yok_tema_yalniz_simge(arayuz):
+    """Kullanıcı istedi: "Yerel model hazır" satırı yok; tema düğmelerinde yazı yok, adları yalnız erişilebilirlik için."""
+    s = _sayfa(arayuz)
+    assert s.locator("#durum").count() == 0 and "Yerel model" not in s.inner_text(".kenar")
+    for b in s.locator(".tema-sec button").all():
+        assert b.inner_text().strip() == "" and b.get_attribute("aria-label")
+    s.click(".tema-sec [data-tema='dark']")
+    assert s.get_attribute("html", "data-theme") == "dark"
+    s.close()
