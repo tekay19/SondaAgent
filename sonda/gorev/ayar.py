@@ -4,7 +4,11 @@ from pathlib import Path
 MAKS_ADIM = 200
 
 
-ADIM_SINIRI = {"basit": 30, "orta": 60, "derin": 150}
+ADIM_SINIRI = {"basit": 30, "orta": 90, "derin": 150}
+# Her zaman titiz (kullanıcı isteği): seçimde en az 5 aday, çok siteli görevde en az 3 (orta) / 4 (derin) site
+TITIZ_ADAY, EN_FAZLA_ADAY = 5, 10
+TITIZ_SITE = {"basit": 1, "orta": 3, "derin": 4}
+KONTROL_TURU = 2  # bitirmeden önceki "görevin her kısmı ve doğrulama yapıldı mı" kontrolü en çok bu kadar tur
 ILERLEME_PENCERESI = 10  # sınırda uzatma için: son kaç adımda ilerleme olmuş mu
 
 

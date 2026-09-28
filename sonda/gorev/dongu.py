@@ -104,8 +104,9 @@ def dongu(g, gorev_metni, onceki, model, t, durum, derinlik):
     """Olay üretir; sonucu durum sözlüğüne yazar (notlar, adimlar, hafiza, sonuc, hal)."""
     notlar, adimlar, hafiza_ = durum["notlar"], durum["adimlar"], durum["hafiza"]
     maks = min(ayar.MAKS_ADIM, derinlik["maks_adim"])
-    geri_bildirim, ekran_iste, son_imza, tekrar, bitir_red = "", False, None, 0, 0
-    yapilan, erken_red, form_red, son_mesaj, islem_red, kontrol_edildi = 0, False, False, "", 0, False
+    geri_bildirim, ekran_iste, son_imza, tekrar = "", False, None, 0
+    bitir_red = {"site": 0, "aday": 0, "sayfa": 0}  # her bitirme kontrolünün kendi hakkı: biri ötekini tüketmesin
+    yapilan, erken_red, form_red, son_mesaj, islem_red, kontrol_turu = 0, False, False, "", 0, 0
     captcha_denenen, son_okuma, son_imzalar, engelli_siteler = set(), None, [], set()
     durum["gizli"].update(koruma.gizli_adaylar(gorev_metni))
     kayit = GorevKaydi(g.id, durum["gizli"])
@@ -209,34 +210,36 @@ def dongu(g, gorev_metni, onceki, model, t, durum, derinlik):
             continue
         if e == "bitir":
             siteler = kaynak_siteleri(notlar)
-            if len(siteler) < derinlik["min_site"] and bitir_red < ayar.BITIR_RED_SINIRI and adim_no < maks - 3:
-                bitir_red += 1
+            if len(siteler) < derinlik["min_site"] and bitir_red["site"] < ayar.BITIR_RED_SINIRI and adim_no < maks - 3:
+                bitir_red["site"] += 1
                 geri_bildirim = (f"Henüz bitirme: bu görev için en az {derinlik['min_site']} farklı siteden bilgi "
                                  f"toplamalısın; şu an {len(siteler)} siteden notun var"
                                  + (f" ({', '.join(siteler)})" if siteler else "")
                                  + ". Başka kaynaklara da bak (gerekirse İngilizce arama yap), bulduklarını not al.")
                 adimlar.append(f"{adim_no}. bitirmek istedi, kaynak yetersiz olduğu için devam{dusunce_ek}")
                 continue
-            if (uyari := aday_uyarisi(derinlik, notlar)) and bitir_red < ayar.BITIR_RED_SINIRI and adim_no < maks - 3:
-                bitir_red += 1
+            if (uyari := aday_uyarisi(derinlik, notlar)) and bitir_red["aday"] < ayar.BITIR_RED_SINIRI and adim_no < maks - 3:
+                bitir_red["aday"] += 1
                 geri_bildirim = f"Henüz bitirme: {uyari}"
                 adimlar.append(f"{adim_no}. bitirmek istedi, yeterli aday incelenmediği için devam{dusunce_ek}")
                 continue
             eksikler = hafiza_.eksik_notlu()
-            if derinlik.get("inceleme"):
+            if derinlik.get("inceleme") or derinlik["derinlik"] == "derin":  # titiz: gezilen sayfa yarım bırakılmaz
                 eksikler += [x for x in hafiza_.eksik_ziyaret() if x not in eksikler]
             elif derinlik["derinlik"] in ("orta", "derin"):  # karşılaştırma: açılmamış "daha fazla"da seçenek kalmasın
                 eksikler += [x for x in hafiza_.eksik_ziyaret(sadece_acilmamis=True) if x not in eksikler]
-            if eksikler and bitir_red < ayar.BITIR_RED_SINIRI and adim_no < maks - 3:
-                bitir_red += 1
-                geri_bildirim = ("Henüz bitirme: not aldığın bazı sayfaları tam incelemedin: "
+            if eksikler and bitir_red["sayfa"] < ayar.BITIR_RED_SINIRI and adim_no < maks - 3:
+                bitir_red["sayfa"] += 1
+                geri_bildirim = ("Henüz bitirme: gezdiğin bazı sayfaları tam incelemedin: "
                                  + "; ".join(f"{u} ({n})" for u, n in eksikler[:3])
                                  + ". Bu sayfalara dönüp kaydır ve 'daha fazla' butonlarını aç; daha iyi seçenek "
                                    "olabilir. Notlarını gerekirse düzelt.")
                 adimlar.append(f"{adim_no}. bitirmek istedi, sayfalar tam incelenmediği için devam{dusunce_ek}")
                 continue
-            if not kontrol_edildi and adim_no < maks - 3:  # "dediğimi yapmalı": görevin her kısmı yapıldı mı?
-                kontrol_edildi = True
+            # "dediğimi yapmalı": görevin her kısmı yapıldı ve genel bilgiler doğrulandı mı? Doğrulamaya giden model
+            # dönünce bir kez daha kontrol edilir.
+            if kontrol_turu < ayar.KONTROL_TURU and adim_no < maks - 3:
+                kontrol_turu += 1
                 if eksik_maddeler := kararlar.gorev_kontrolu(model, model_metni, notlar, adimlar, karar.get("sonuc", "")):
                     liste = koruma.gizle("; ".join(eksik_maddeler), durum["gizli"])
                     geri_bildirim = (f"Henüz bitirme: görevin şu kısımları yapılmamış görünüyor: {liste}. Bunları şimdi "

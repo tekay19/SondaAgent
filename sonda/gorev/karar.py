@@ -72,11 +72,14 @@ def derinlik_belirle(model, gorev_metni, onceki):
     except (TypeError, ValueError):
         min_site = 2
     try:
-        min_aday = max(0, min(5, int(veri.get("min_aday", 0))))
+        min_aday = max(0, min(ayar.EN_FAZLA_ADAY, int(veri.get("min_aday", 0))))
     except (TypeError, ValueError):
         min_aday = 0
-    if not min_aday and _SECIM.search(koruma.sade(gorev_metni)):
-        min_aday = 3
+    if min_aday or _SECIM.search(koruma.sade(gorev_metni)):
+        min_aday = max(min_aday, ayar.TITIZ_ADAY)  # kullanıcı her zaman titiz ister: seçimde en az 5 aday
+    # Çok siteli görevde site alt sınırı yükselir; tek siteyi söyleyen görev (min_site 1) o siteden çıkarılmaz
+    if min_site > 1:
+        min_site = max(min_site, ayar.TITIZ_SITE[derinlik])
     plan = veri.get("plan") if isinstance(veri.get("plan"), list) else []
     plan = [a.strip() for a in plan if isinstance(a, str) and a.strip()][:6]
     return {"derinlik": derinlik, "min_site": max(1, min(5, min_site)), "inceleme": veri.get("inceleme") is True,

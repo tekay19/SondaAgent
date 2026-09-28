@@ -90,6 +90,9 @@ değerlendir ve kısa bir plan yap. Sadece JSON döndür:
   tek ürün/sayfayla iş yapmak için 0.
 - Kullanıcının tarayıcısındaki mevcut oturum kullanılır: plana giriş yapma adımı koyma; hesapla ilgili işlerde
   doğrudan hesap/profil sayfasına gidilir. Giriş sayfası çıkarsa ve görevde şifre verilmişse ancak o zaman giriş yapılır.
+- Kullanıcı her zaman titiz çalışılmasını istiyor: üstünkörü bakma. Planda sitelerin filtre ve sıralama araçlarını
+  kullanmayı, adayların kendi sayfalarını sonuna kadar okumayı (açıklama, özellikler, yorumlar, satıcı) ve genel
+  bilgileri (oran, tarih, resmî rakam, teknik özellik) ikinci bir kaynaktan doğrulamayı yaz.
 - plan: 3-6 kısa adım (hangi aramalar, hangi site türleri, neler karşılaştırılacak). Konu uluslararasıysa ya da
   Türkçe kaynak azsa İngilizce aramayı ve İngilizce siteleri de plana koy."""
 
@@ -100,6 +103,10 @@ Kullanıcıya Türkçe, net ve kaliteli bir sonuç yaz:
 - Kullanıcı cevabın biçimini, uzunluğunu ya da içeriğini söylediyse (ör. "5 madde", "birer cümleyle", "tablo yap",
   "sadece fiyatı yaz") tam olarak ona uy; istenmeyen bölüm (genel değerlendirme, güçlü/zayıf yönler, öneriler) ekleme.
 - Önce doğrudan sonuç: ne bulundu, ne yapıldı. Karşılaştırma varsa Markdown tablo kullan.
+- Kullanıcı titiz ve dolu bir rapor istiyor (başka biçim istemediyse): incelenen her aday için tabloda bir satır
+  (notlardaki bütün karşılaştırma bilgileriyle); seçilen için neden seçildiği, diğerleri için neden elendi; önemli
+  genel bilgiler için doğrulama durumu ("iki kaynakta aynı [1][3]", "tek kaynak [2]" ya da "kaynaklar çelişiyor");
+  en sonda hangi sitelerde nelere bakıldığının kısa dökümü.
 - Notlardaki her bilginin sonuna kaynak numarasını köşeli parantezle yaz: [1]. İngilizce kaynaklardaki bilgiyi
   Türkçeye çevir. Sayfada yazmayan genel bilgilere ve kendi yorumlarına numara koyma; bunları "genel bilgi" ya da
   "değerlendirmem" diye belirt.
@@ -149,6 +156,10 @@ yapılmış gibi söylenen ama adımlarda ya da notlarda kanıtı olmayan maddey
 Bir madde yapılamadıysa ama notlarda ya da adımlarda geçerli bir nedeni varsa (site izin vermiyor, aranan şey yok,
 adım kullanıcıya bırakıldı, güvenlik kuralı gereği kullanıcının işi) onu yapıldı say. Son cevap notlardan yazılacağı
 için biçim maddelerini (tablo, madde sayısı) yapıldı say.
+Doğrulama: görevin cevabında yer alacak genel geçer bir bilgi (oran, tarih, resmî rakam, istatistik, teknik özellik,
+yasal kural) notlarda yalnızca tek kaynaktan geliyorsa onu ayrı bir madde yap ve yapılmadı say; kanıta "tek kaynak,
+ikinci bir kaynaktan doğrulanmalı" yaz. Bir sitenin kendine özgü bilgisi (o sitedeki fiyat, stok, satıcı, kargo süresi,
+ilanın kendisi) doğrulama istemez.
 Sadece JSON döndür: {{"maddeler": [{{"istek": "...", "yapildi": true, "kanit": "kısa kanıt ya da eksik olan"}}]}}"""
 
 CAPTCHA_SEBEBI = ("🧩 Robot doğrulaması tamamlanamadı (resimli bulmaca ya da ek kontrol istiyor). Chrome'da "

@@ -1294,11 +1294,11 @@ def test_serbest_modda_kart_alanli_sayfada_formsuz_onayla_kullaniciya_kalir(saht
 # ---- seçim görevleri: canlı Trendyol testinde "birkaç seçeneği karşılaştır" denmişken tek ürüne bakıp sepete ekledi
 def test_derinlik_aday_sayisi(monkeypatch):
     monkeypatch.setattr(gorev.karar.saglayici, "sohbet",
-                        lambda *a, **k: Yanit('{"derinlik": "orta", "min_site": 1, "min_aday": 9}'))
-    assert gorev.karar.derinlik_belirle("m", "x", "")["min_aday"] == 5
+                        lambda *a, **k: Yanit('{"derinlik": "orta", "min_site": 1, "min_aday": 99}'))
+    assert gorev.karar.derinlik_belirle("m", "x", "")["min_aday"] == 10  # "10 ilan bul" gibi görevler 5'te kesilmesin
     monkeypatch.setattr(gorev.karar.saglayici, "sohbet", lambda *a, **k: Yanit('{"derinlik": "orta", "min_site": 1}'))
-    assert gorev.karar.derinlik_belirle("m", "Trendyol'da fiyat/performansı iyi bir powerbank seç", "")["min_aday"] == 3
-    assert gorev.karar.derinlik_belirle("m", "Birkaç seçeneği karşılaştırıp en iyisini sepete ekle", "")["min_aday"] == 3
+    assert gorev.karar.derinlik_belirle("m", "Trendyol'da fiyat/performansı iyi bir powerbank seç", "")["min_aday"] == 5
+    assert gorev.karar.derinlik_belirle("m", "Birkaç seçeneği karşılaştırıp en iyisini sepete ekle", "")["min_aday"] == 5
     assert gorev.karar.derinlik_belirle("m", "Merkez Bankası'ndan dolar kurunu bul", "")["min_aday"] == 0
 
 
@@ -1405,7 +1405,8 @@ def test_gorevin_eksik_kismi_varken_bitirme_reddedilir(sahte, yerel_tarayici_ac,
     monkeypatch.setattr(gorev.karar, "gorev_kontrolu", kontrol, raising=False)
     calistir(yerel_tarayici_ac, metin="A'yı yap, sonra B'yi yap")
     assert "B'yi yap" in m.istemler[3].split("SON EYLEMİN SONUCU:")[1].split("MEVCUT SAYFA")[0]
-    assert len(m.istemler) == 5 and cagrilar == ["A yapıldı"]  # ikinci bitirmede yeniden sorulmaz
+    # titiz: ikinci bitirmede de kontrol edilir (doğrulamadan dönen model); en çok KONTROL_TURU tur, sonra kabul
+    assert len(m.istemler) == 6 and cagrilar == ["A yapıldı", "A ve B"]
 
 
 def test_serbest_kurali_sistem_istemine_girer(monkeypatch):
@@ -1419,3 +1420,77 @@ def test_serbest_kurali_sistem_istemine_girer(monkeypatch):
     assert "ASLA basma" in sistemler[0] and "izni verdi" not in sistemler[0]
     assert "butonlara basma izni verdi" in sistemler[1] and "ASLA basma" not in sistemler[1]
     assert "Ödeme, satın alma, sipariş" in sistemler[1]
+
+
+# ---- her zaman titiz: kullanıcı "çok üstünkörü bakıyor" dedi (28 Eylül); seçenek, tam okuma, doğrulama, dolu rapor
+def _derinlik_yaniti(monkeypatch, json_metni):
+    monkeypatch.setattr(gorev.karar.saglayici, "sohbet", lambda *a, **k: Yanit(json_metni))
+
+
+def test_titiz_aday_alt_siniri_bes(monkeypatch):
+    _derinlik_yaniti(monkeypatch, '{"derinlik": "derin", "min_site": 3, "min_aday": 2}')
+    assert gorev.karar.derinlik_belirle("m", "x", "")["min_aday"] == 5
+
+
+def test_titiz_site_alt_siniri_cok_siteli_gorevde(monkeypatch):
+    _derinlik_yaniti(monkeypatch, '{"derinlik": "derin", "min_site": 2}')
+    assert gorev.karar.derinlik_belirle("m", "x", "")["min_site"] == 4
+    _derinlik_yaniti(monkeypatch, '{"derinlik": "orta", "min_site": 2}')
+    assert gorev.karar.derinlik_belirle("m", "x", "")["min_site"] == 3
+    _derinlik_yaniti(monkeypatch, '{"derinlik": "basit", "min_site": 1}')  # tek sitelik basit iş zorlanmaz;
+    assert gorev.karar.derinlik_belirle("m", "sepete ekle", "")["min_site"] == 1  # genel bilgiyi doğrulama kuralı korur
+
+
+def test_titiz_tek_siteli_gorev_siteden_cikarilmaz(monkeypatch):
+    """"Trendyol'da seç" gibi görevde site sayısı zorlanırsa Sonda Trendyol'dan çıkar; titizlik aday sayısıyla gelir."""
+    _derinlik_yaniti(monkeypatch, '{"derinlik": "orta", "min_site": 1, "min_aday": 3}')
+    d = gorev.karar.derinlik_belirle("m", "Trendyol'da fiyat/performansı iyi bir powerbank seç", "")
+    assert d["min_site"] == 1 and d["min_aday"] == 5
+
+
+def test_titiz_orta_gorev_adim_siniri():
+    assert gorev.ayar.ADIM_SINIRI["orta"] >= 90
+
+
+def test_titiz_derinlik_promptu_titizligi_ister():
+    p = gorev.promptlar.DERINLIK_PROMPTU.lower()
+    assert "titiz" in p and "filtre" in p
+
+
+def test_bitirme_kontrolleri_ayri_sayilir(sahte, yerel_tarayici_ac, monkeypatch):
+    """Site sayısı iki kez reddedince aday kontrolü hakkını kaybetmemeli (tek sayaç erken bitirtiyordu)."""
+    m = sahte([{"eylem": "bitir", "sonuc": "a"}] * 8)
+    monkeypatch.setattr(gorev.karar, "derinlik_belirle",
+                        lambda *a: {"derinlik": "derin", "min_site": 4, "min_aday": 2, "maks_adim": 80, "plan": []})
+    calistir(yerel_tarayici_ac)
+    istemler = "\n".join(m.istemler)
+    assert len(m.istemler) == 5 and "farklı siteden" in istemler and "adayın kendi sayfasını" in istemler
+
+
+def test_derin_gorevde_notsuz_yarim_sayfa_da_bitirtmez(sahte, yerel_tarayici_ac, site, monkeypatch):
+    """Canlı test: Trendyol'da 60 sn kalıp not almadan çıktı; derin görevde gezilen sayfa tam incelenmeli."""
+    m = sahte([{"eylem": "git", "url": f"{site}/uzun.html"}, {"eylem": "bitir", "sonuc": "a"}, {"eylem": "bitir", "sonuc": "a"}])
+    monkeypatch.setattr(gorev.karar, "derinlik_belirle",
+                        lambda *a: {"derinlik": "derin", "min_site": 1, "maks_adim": 40, "plan": [], "inceleme": False})
+    calistir(yerel_tarayici_ac)
+    assert any("tam incelemedin" in i for i in m.istemler)
+
+
+def test_gorev_kontrolu_iki_tur_calisir(sahte, yerel_tarayici_ac, monkeypatch):
+    """Doğrulama için ikinci kaynağa gönderilen model, dönünce bir kez daha kontrol edilmeli."""
+    m = sahte([{"eylem": "bitir", "sonuc": "a"}] * 5)
+    cagri = []
+    monkeypatch.setattr(gorev.karar, "gorev_kontrolu", lambda *a: cagri.append(1) or ["oran ikinci kaynakla doğrulanmadı"])
+    calistir(yerel_tarayici_ac)
+    assert len(cagri) == 2 and len(m.istemler) == 5  # 2 site reddi (not yok) + 2 kontrol reddi + kabul
+
+
+def test_kontrol_promptu_tek_kaynakli_bilgiyi_eksik_sayar():
+    p = gorev.promptlar.KONTROL_PROMPTU.lower()
+    assert "tek kaynak" in p and "ikinci" in p and "fiyat" in p  # siteye özgü fiyat doğrulama istemez
+
+
+def test_sonuc_promptu_dolu_rapor_ister():
+    p = gorev.promptlar.SONUC_PROMPTU.lower()
+    for ifade in ("her aday", "neden elendi", "doğrulama durumu"):
+        assert ifade in p, ifade
