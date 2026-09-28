@@ -318,3 +318,19 @@ def test_karsilamada_hazir_soru_kartlari_yok(arayuz):
     assert s.locator(".karsilama").count() == 1 and s.locator(".oneri, [data-oneri]").count() == 0
     assert "Dolar ve altın" not in s.inner_text(".karsilama")
     s.close()
+
+
+def test_sade_duzen_ayarlar_dislisi_hafiza_icinde_tema_sag_ustte(arayuz):
+    """Kullanıcı istedi: hafıza ayarların içinde; ayarlar sol altta dişli; tema sağ üstte; Markdown indirme, üstteki
+    ikinci yeni sohbet düğmesi ve karşılama başlığı/açıklaması yok."""
+    s = _sayfa(arayuz)
+    assert s.locator("#hafiza-ac, #disa-aktar, #yeni-sohbet-2").count() == 0
+    assert s.locator(".kenar-alt #ayarlar-ac").count() == 1 and s.inner_text("#ayarlar-ac").strip() == ""
+    assert s.locator(".ust-cubuk .tema-sec").count() == 1
+    karsilama = s.inner_text(".karsilama")
+    assert "Bugün neyi araştıralım" not in karsilama and "internette arar" not in karsilama
+    s.click("#ayarlar-ac")
+    s.wait_for_selector("#gemini-anahtar")
+    govde = s.inner_text("#cekmece-govde")
+    assert "Gemini" in govde and "Hafıza" in govde
+    s.close()

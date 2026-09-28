@@ -79,6 +79,8 @@ svg.ik { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none
 .hafiza-btn { margin-top: 0; border-color: transparent; background: none; }
 .hafiza-btn:hover { background: var(--yuzey-2); border-color: transparent; }
 .hafiza-btn span { margin-left: auto; font-size: 12px; color: var(--soluk); }
+.ayar-bolum { font: 650 15px var(--baslik); margin: 6px 6px 6px; }
+#hafiza-bolumu { border-top: 1px solid var(--cizgi); margin-top: 18px; padding-top: 12px; }
 .hafiza-aciklama { color: var(--soluk); font-size: 13.5px; margin: 0 6px 12px; line-height: 1.5; }
 .hafiza-oge { display: flex; gap: 8px; align-items: flex-start; padding: 10px; border-radius: 10px; font-size: 14px; }
 .hafiza-oge:hover { background: var(--yuzey-2); }
@@ -121,8 +123,10 @@ svg.ik { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none
 .sil-onay button { border: 0; border-radius: 6px; padding: 3px 9px; font-size: 12.5px; background: var(--cizgi); }
 .sil-onay button.tehlike { background: var(--hata); color: #fff; }
 .gecmis-bos { color: var(--soluk); font-size: 13.5px; padding: 16px 8px; }
-.kenar-alt { border-top: 1px solid var(--cizgi); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
-.tema-sec { display: flex; gap: 2px; align-self: flex-end; background: var(--yuzey-2); border-radius: 999px; padding: 3px; }
+.kenar-alt { border-top: 1px solid var(--cizgi); padding: 8px 10px; display: flex; align-items: center; }
+.ayar-disli svg { transition: transform .5s cubic-bezier(.2,.8,.2,1); }
+.ayar-disli:hover svg { transform: rotate(60deg); }
+.tema-sec { display: flex; gap: 2px; background: var(--yuzey-2); border-radius: 999px; padding: 3px; }
 .tema-sec button { width: 30px; height: 26px; border: 0; background: none; border-radius: 999px; color: var(--soluk); display: grid; place-items: center; transition: color .15s, background .15s; }
 .tema-sec button:hover { color: var(--metin); }
 .tema-sec button svg { width: 15px; height: 15px; }
@@ -428,8 +432,8 @@ svg.ik { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none
 @keyframes kazi { from { opacity: 0; transform: translateY(6px) scale(.8); filter: blur(3px); color: var(--safran); } 60% { color: var(--safran); filter: blur(0); } }
 .marka-orhun { font-family: var(--orhun); font-weight: 400; font-size: 13px; color: var(--soluk); margin-left: 2px; letter-spacing: 1px; opacity: .8; }
 @keyframes dokuma { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
-.karsilama h1, .karsilama p { animation: belir .6s cubic-bezier(.2,.7,.2,1) both; }
-.karsilama h1 { animation-delay: .55s; } .karsilama p { animation-delay: .7s; }
+.gizli-baslik { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.karsilama .yazit { margin-bottom: 0; transform: scale(1.25); }
 @keyframes belir { from { opacity: 0; transform: translateY(8px); } }
 /* Tezgâh: Sonda çalışırken küçük bir kilim şeridi dokunmaya devam eder; mekik ileri geri gider */
 .yaziyor span { display: none; }
@@ -495,7 +499,7 @@ svg.ik { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none
   <symbol id="i-dal" viewBox="0 0 24 24"><path d="M5 4v8a4 4 0 0 0 4 4h10M15 12l4 4-4 4"/></symbol>
   <symbol id="i-beyin" viewBox="0 0 24 24"><path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 3 3 3 3 0 0 0 3-3V7a3 3 0 0 0-3-3ZM15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-2 5 3 3 0 0 1-3 3 3 3 0 0 1-3-3"/></symbol>
   <symbol id="i-hesap" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2.5"/><path d="M8.5 7.5h7M8.5 12h.01M12 12h.01M15.5 12h.01M8.5 16h.01M12 16h.01M15.5 16h.01"/></symbol>
-  <symbol id="i-ayar" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m10.8 12.2 8.2-8.2M16 7l2.5 2.5M14 9l2 2"/></symbol>
+  <symbol id="i-ayar" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
   <symbol id="i-hafiza" viewBox="0 0 24 24"><path d="M12 3a7 7 0 0 0-4 12.7V19h8v-3.3A7 7 0 0 0 12 3ZM9.5 22h5"/></symbol>
   <symbol id="i-yaz" viewBox="0 0 24 24"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></symbol>
   <symbol id="i-imlec" viewBox="0 0 24 24"><path d="M5 3l14 7-6 2-2 6Z"/><path d="m13 13 5 5"/></symbol>
@@ -510,15 +514,9 @@ svg.ik { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none
     </div>
     <button class="yeni-btn" id="yeni-sohbet"><svg class="ik"><use href="#i-yeni"/></svg>Yeni sohbet<kbd>Ctrl Shift O</kbd></button>
     <div class="gecmis-ara"><svg class="ik"><use href="#i-ara"/></svg><input id="gecmis-ara" type="search" placeholder="Sohbetlerde ara" aria-label="Sohbetlerde ara"></div>
-    <button class="yeni-btn hafiza-btn" id="hafiza-ac"><svg class="ik"><use href="#i-hafiza"/></svg>Hafıza<span id="hafiza-sayi"></span></button>
-    <button class="yeni-btn hafiza-btn" id="ayarlar-ac"><svg class="ik"><use href="#i-ayar"/></svg>Ayarlar</button>
     <nav class="gecmis" id="gecmis"></nav>
     <div class="kenar-alt">
-      <div class="tema-sec" role="group" aria-label="Tema">
-        <button data-tema="light" title="Açık tema" aria-label="Açık tema"><svg class="ik"><use href="#i-gunes"/></svg></button>
-        <button data-tema="dark" title="Koyu tema" aria-label="Koyu tema"><svg class="ik"><use href="#i-ay"/></svg></button>
-        <button data-tema="system" title="Sistem teması" aria-label="Sistem teması"><svg class="ik"><use href="#i-ekran"/></svg></button>
-      </div>
+      <button class="ikon-btn ayar-disli" id="ayarlar-ac" aria-label="Ayarlar" title="Ayarlar"><svg class="ik"><use href="#i-ayar"/></svg></button>
     </div>
   </aside>
   <div class="perde" id="perde"></div>
@@ -528,8 +526,11 @@ svg.ik { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none
       <button class="ikon-btn menu-ac" id="menu-ac" aria-label="Menüyü aç" title="Menüyü aç"><svg class="ik"><use href="#i-panel"/></svg></button>
       <div class="model-sec"><select id="model" aria-label="Model"></select><svg class="ik"><use href="#i-asagi"/></svg></div>
       <div class="ust-bosluk"></div>
-      <button class="ikon-btn" id="disa-aktar" aria-label="Sohbeti Markdown olarak indir" title="Sohbeti Markdown olarak indir" hidden><svg class="ik"><use href="#i-indir"/></svg></button>
-      <button class="ikon-btn" id="yeni-sohbet-2" aria-label="Yeni sohbet" title="Yeni sohbet"><svg class="ik"><use href="#i-yeni"/></svg></button>
+      <div class="tema-sec" role="group" aria-label="Tema">
+        <button data-tema="light" title="Açık tema" aria-label="Açık tema"><svg class="ik"><use href="#i-gunes"/></svg></button>
+        <button data-tema="dark" title="Koyu tema" aria-label="Koyu tema"><svg class="ik"><use href="#i-ay"/></svg></button>
+        <button data-tema="system" title="Sistem teması" aria-label="Sistem teması"><svg class="ik"><use href="#i-ekran"/></svg></button>
+      </div>
     </header>
     <button class="alta-in" id="alta-in" aria-label="En alta in"><svg class="ik"><use href="#i-asagi"/></svg></button>
 
@@ -640,9 +641,9 @@ $("#menu-kapat").onclick = () => mobil() ? U.classList.remove("mobil-menu") : (U
 $("#menu-ac").onclick = () => mobil() ? U.classList.add("mobil-menu") : (U.classList.remove("kapali"), depo.yaz("sonda-menu", true));
 $("#perde").onclick = () => U.classList.remove("mobil-menu");
 if (depo.oku("sonda-menu", true) === false) U.classList.add("kapali");
-$("#cekmece-kapat").onclick = () => U.classList.remove("cekmece-acik", "hafiza-modu", "ayar-modu");
+$("#cekmece-kapat").onclick = () => U.classList.remove("cekmece-acik", "ayar-modu");
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape") { U.classList.remove("cekmece-acik", "mobil-menu", "hafiza-modu", "ayar-modu"); }
+  if (e.key === "Escape") { U.classList.remove("cekmece-acik", "mobil-menu", "ayar-modu"); }
   if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "o") { e.preventDefault(); yeniSohbet(); }
 });
 
@@ -740,8 +741,7 @@ function ebruDamla(el) {
 function karsilamaCiz() {
   $("#sutun").innerHTML = `<div class="karsilama">${EBRU}
     <div class="yazit"><div class="kilim-bant sol" aria-hidden="true"></div><span class="orhun" lang="otk" title="bilig: Göktürkçe &quot;bilgi&quot;">${[..."𐰋𐰃𐰠𐰃𐰏"].map((h, i) => `<i style="--s:${i}">${h}</i>`).join("")}</span><div class="kilim-bant sag" aria-hidden="true"></div></div>
-    <h1>Bugün neyi araştıralım?</h1>
-    <p>Sonda internette arar, sayfaları okur ve her bilgiyi kaynağıyla birlikte getirir.</p></div>`;
+    <h1 class="gizli-baslik">Sonda</h1></div>`;
 }
 function sohbetAc(id) {
   S.aktif = id; U.classList.remove("cekmece-acik");
@@ -749,17 +749,15 @@ function sohbetAc(id) {
   if (!s) return yeniSohbet();
   $("#sutun").innerHTML = "";
   s.mesajlar.forEach((m, i) => $("#sutun").append(m.role === "user" ? kullaniciEl(m.content, i, m.belgeler || []) : asistanEl(m, i)));
-  $("#disa-aktar").hidden = false;
   gecmisCiz(); $("#akis").scrollTop = $("#akis").scrollHeight; belgeleriCiz();
 }
 function yeniSohbet() {
   if (S.calisiyor) S.iptal?.abort();
   S.aktif = null; U.classList.remove("cekmece-acik");
-  $("#disa-aktar").hidden = true;
   S.bekleyenBelgeler = [];
   karsilamaCiz(); gecmisCiz(); alan.focus(); belgeleriCiz();
 }
-$("#yeni-sohbet").onclick = yeniSohbet; $("#yeni-sohbet-2").onclick = yeniSohbet;
+$("#yeni-sohbet").onclick = yeniSohbet;
 
 function kullaniciEl(metin, indeks, belgeler = []) {
   const d = document.createElement("div"); d.className = "m-kullanici"; d.dataset.indeks = indeks;
@@ -890,7 +888,7 @@ function asistanGuncelle(d, m, canli) {
 
 // ---------- kaynak çekmecesi
 function cekmeceAc(iz, vurgu) {
-  U.classList.remove("hafiza-modu", "ayar-modu");
+  U.classList.remove("ayar-modu");
   $("#cekmece-baslik").textContent = `Kaynaklar (${iz.kaynaklar.length})`;
   $("#cekmece-govde").innerHTML = iz.kaynaklar.map(k => k.belge ? `
     <div class="ck-kaynak belge${String(k.no) === String(vurgu) ? " vurgu" : ""}" data-no="${k.no}">
@@ -1014,7 +1012,6 @@ async function gonder() {
   const m = { role: "assistant", content: "", mod: S.mod, iz: { adimlar: [], kaynaklar: [], sure: null } };
   s.mesajlar.push(m); kaydet(); gecmisCiz();
 
-  $("#disa-aktar").hidden = false;
   const kEl = kullaniciEl(soru, s.mesajlar.length - 2, belgeler.map(b => b.ad));
   const aEl = asistanEl(m, s.mesajlar.length - 1);
   $("#sutun").append(kEl, aEl);
@@ -1085,22 +1082,6 @@ async function gonder() {
   alan.focus();
 }
 
-// ---------- dışa aktarma
-$("#disa-aktar").onclick = () => {
-  const s = aktifSohbet(); if (!s) return;
-  let md = `# ${s.baslik}\n\n`;
-  for (const m of s.mesajlar) {
-    if (m.role === "user") { md += `## Soru\n\n${m.content}\n\n`; continue; }
-    md += `## Cevap\n\n${m.content}\n\n`;
-    if (m.iz?.kaynaklar?.length) md += "### Kaynaklar\n\n" + m.iz.kaynaklar.map(k => k.belge ? `${k.no}. 📄 ${k.baslik}` : `${k.no}. [${k.baslik}](${k.url})`).join("\n") + "\n\n";
-  }
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([md], { type: "text/markdown;charset=utf-8" }));
-  a.download = `${s.baslik.replace(/[\\/:*?"<>|]+/g, "").slice(0, 50) || "sohbet"}.md`;
-  a.click(); URL.revokeObjectURL(a.href);
-  bildir("Sohbet Markdown olarak indirildi");
-};
-
 // ---------- en alta in
 const akisEl = $("#akis");
 akisEl.addEventListener("scroll", () => {
@@ -1108,37 +1089,35 @@ akisEl.addEventListener("scroll", () => {
 }, { passive: true });
 $("#alta-in").onclick = () => akisEl.scrollTo({ top: akisEl.scrollHeight, behavior: "smooth" });
 
-// ---------- hafıza paneli (sağ çekmecede)
-async function hafizaCiz(ac = false) {
+// ---------- hafıza: ayarlar panelinin içinde
+async function hafizaHTML() {
   let liste = [];
   try { liste = await (await fetch("/api/hafiza")).json(); } catch {}
-  $("#hafiza-sayi").textContent = liste.length || "";
-  if (!ac && !U.classList.contains("hafiza-modu")) return;
-  U.classList.remove("ayar-modu");
-  U.classList.add("hafiza-modu");
-  $("#cekmece-baslik").textContent = "Hafıza";
-  $("#cekmece-govde").innerHTML = `<p class="hafiza-aciklama">Sonda sohbetlerinden senin hakkında öğrendiklerini burada saklar ve tüm sohbetlerde kullanır. Bu bilgiler yalnızca bu bilgisayarda durur. Bir şeyi hatırlamasını istersen "bunu hatırla" demen yeterli.</p>`
+  return `<h3 class="ayar-bolum">Hafıza</h3><p class="hafiza-aciklama">Sonda sohbetlerinden senin hakkında öğrendiklerini burada saklar ve tüm sohbetlerde kullanır. Bu bilgiler yalnızca bu bilgisayarda durur. Bir şeyi hatırlamasını istersen "bunu hatırla" demen yeterli.</p>`
     + (liste.length ? [...liste].reverse().map(b => `<div class="hafiza-oge"><span>${kacis(b.metin)}</span><button data-hafiza-sil="${b.id}" aria-label="Unut" title="Unut">${ik("cop")}</button></div>`).join("")
       + `<button class="hafiza-temizle" data-hafiza-temizle>Tüm hafızayı sil</button>`
       : `<p class="hafiza-aciklama">Henüz hatırlanan bir şey yok.</p>`);
-  U.classList.add("cekmece-acik");
 }
-$("#hafiza-ac").onclick = () => { hafizaCiz(true); U.classList.remove("mobil-menu"); };
+// Cevap sonrası arka planda çağrılır: ayarlar açıksa hafıza bölümünü tazeler, paneli ezmez
+async function hafizaCiz() {
+  const yer = $("#hafiza-bolumu");
+  if (yer && U.classList.contains("ayar-modu")) yer.innerHTML = await hafizaHTML();
+}
 
 // ---------- ayarlar paneli (sağ çekmecede)
 async function ayarlarCiz(durum = "") {
   let a = { gemini: { var: false, son4: "" } };
   try { a = await (await fetch("/api/ayarlar")).json(); } catch {}
-  U.classList.remove("hafiza-modu");
   U.classList.add("ayar-modu");
   $("#cekmece-baslik").textContent = "Ayarlar";
   $("#cekmece-govde").innerHTML = `
-    <p class="hafiza-aciklama"><b>Gemini (bulut model)</b><br>Anahtar eklersen model seçicide ucuz Gemini modelleri çıkar. Anahtar yalnızca bu bilgisayarda saklanır. Bulut model seçtiğinde soruların ve ziyaret edilen sayfaların içeriği Google'a gider; hesaplarınla çalışırken ücretli katman önerilir. Görevde verdiğin şifre hiçbir modele gönderilmez.</p>
+    <h3 class="ayar-bolum">Gemini</h3><p class="hafiza-aciklama">Anahtar eklersen model seçicide ucuz Gemini modelleri çıkar. Anahtar yalnızca bu bilgisayarda saklanır. Bulut model seçtiğinde soruların ve ziyaret edilen sayfaların içeriği Google'a gider; hesaplarınla çalışırken ücretli katman önerilir. Görevde verdiğin şifre hiçbir modele gönderilmez.</p>
     <div class="ayar-alan">
       <input id="gemini-anahtar" type="password" autocomplete="off" aria-label="Gemini API anahtarı" placeholder="${a.gemini.var ? `Kayıtlı anahtar ${kacis(a.gemini.son4)}` : "Gemini API anahtarı"}">
       <div class="ayar-butonlar"><button data-gemini-kaydet>Kaydet ve test et</button>${a.gemini.var ? "<button data-gemini-sil>Sil</button>" : ""}</div>
     </div>
-    ${durum}`;
+    ${durum}
+    <div id="hafiza-bolumu">${await hafizaHTML()}</div>`;
   U.classList.add("cekmece-acik");
 }
 $("#ayarlar-ac").onclick = () => { ayarlarCiz(); U.classList.remove("mobil-menu"); };
