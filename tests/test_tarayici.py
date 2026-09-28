@@ -193,13 +193,10 @@ def test_daha_fazla_goster_butonu_icerik_acar(tarayici, site):
 def test_ustu_kapali_butona_tiklama_engeli_soyler(tarayici, site):
     """Upwork'te görülen: tıklama zaman aşımı. Üstünde çerez/pop-up varsa model nedenini öğrenmeli."""
     from sonda.tarayici import TiklamaEngeli
-    tarayici.git(f"{site}/engel.html")
-    with pytest.raises(TiklamaEngeli) as h:
-        tarayici.tikla(bul(tarayici.bak(), "Devam et")["no"])
-    assert "Tümünü kabul et" in str(h.value) or "çerez" in str(h.value)
-    tarayici.tikla(bul(tarayici.bak(), "Tümünü kabul et")["no"])
+    tarayici.git(f"{site}/engel.html")  # çerez penceresi kendiliğinden onaylanır, asıl tıklama yapılır
     tarayici.tikla(bul(tarayici.bak(), "Devam et")["no"])
     assert tarayici.sayfa.inner_text("#sonuc") == "Devam edildi"
+    assert tarayici.sayfa.locator("#cerez").count() == 0
 
 
 def test_kaydirilan_alandaki_butona_tiklanir(tarayici, site):
@@ -400,3 +397,20 @@ def test_basili_tut_gecen_uzun_kilavuz_captcha_sayilmaz():
     assert basili_tut_mu("İnsan olduğunuzu doğrulamak için Basılı Tutun")
     assert not basili_tut_mu("Telefonu kapatmak için güç tuşunu basılı tutun. " * 60)
     assert not basili_tut_mu("Press and hold the button to pair your headphones.")
+
+
+
+def test_golge_domdaki_cerez_penceresi_onaylanir(tarayici, site):
+    """Canlı #201: Teknosa'nın EFILLI-LAYOUT-DYNAMIC çerez penceresi (gölge DOM) her tıklamayı engelliyordu."""
+    tarayici.git(f"{site}/cerez_golge.html")
+    tarayici.tikla(bul(tarayici.bak(), "Devam et")["no"])
+    assert tarayici.sayfa.inner_text("#sonuc") == "Devam edildi"
+
+
+def test_cerezle_ilgisiz_kabul_penceresine_basilmaz(tarayici, site):
+    """Güvenlik: yalnızca çerez/KVKK penceresi onaylanır; üyelik/teklif gibi bir "Kabul et"e kod basmaz."""
+    from sonda.tarayici import TiklamaEngeli
+    tarayici.git(f"{site}/kabul_tuzak.html")
+    with pytest.raises(TiklamaEngeli):
+        tarayici.tikla(bul(tarayici.bak(), "Devam et")["no"])
+    assert tarayici.sayfa.inner_text("#sonuc") == ""

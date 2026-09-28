@@ -29,6 +29,23 @@ def basili_tut_mu(metin):
     return len(metin) < BASILI_TUT_METNI and bool(_BASILI_TUT.search(metin)) and bool(_DOGRULAMA_SOZU.search(metin))
 
 
+# Çerez onayı: tıklama bir örtü yüzünden engellenince kod çerez penceresini onaylar (gölge DOM dahil; canlı #201
+# Teknosa EFILLI-LAYOUT-DYNAMIC). Yalnızca çevresinde çerez/KVKK metni olan onay düğmesine basılır: üyelik ya da
+# teklif penceresindeki "Kabul et"e basılmaz.
+CEREZ_DUGMESI = re.compile(r"^\s*((tüm|tümünü|tüm çerezleri|hepsini|çerezleri)\s+)?(kabul et|kabul ediyorum)\s*$"
+                           r"|^\s*(accept|accept all|accept all cookies|accept cookies|allow all|allow all cookies"
+                           r"|i agree|got it|anladım|tamam)\s*$", re.I)
+CEREZ_BAGLAMI = """e => {
+  const re = /çerez|cerez|cookie|kvkk|kişisel veri|gizlilik|privacy|consent/i;
+  let d = e;
+  for (let i = 0; i < 10 && d; i++) {
+    if (re.test(d.innerText || d.textContent || "")) return true;
+    d = d.parentElement || (d.getRootNode && d.getRootNode().host) || null;
+  }
+  return false;
+}"""
+
+
 def captcha_adresi_mi(url):
     p = urlparse(url)
     onek = CAPTCHA_SUNUCULARI.get((p.hostname or "").lower())
@@ -288,6 +305,13 @@ class Tarayici:
                     engel = loc.evaluate(ENGEL, timeout=3000)
                 except Exception:
                     engel = None
+                if engel and self.cerez_onayla():
+                    try:  # örtü çerez penceresiydi ve kapandı: asıl tıklama bir kez daha
+                        loc.click(timeout=4000, no_wait_after=True)
+                        self._bekle(bekleyen)
+                        return
+                    except Exception:
+                        engel = loc.evaluate(ENGEL, timeout=3000) if loc.count() else None
                 if engel:
                     raise TiklamaEngeli(f"Tıklanacak öğenin üstünde başka bir öğe var: “{engel}”. Önce onu kapat "
                                         "(ör. çerezleri kabul et / pop-up'ı kapat) ya da sayfayı kaydır.") from None
@@ -299,6 +323,18 @@ class Tarayici:
                 raise RuntimeError("Tıklama zaman aşımına uğradı (tıklanmış da olabilir). Sayfanın yeni haline bak; "
                                    "gerekirse öğeyi yeniden seçip tekrar dene.") from None
             self._bekle(bekleyen)
+
+    def cerez_onayla(self):
+        """Görünür çerez onay düğmesine basar (gölge DOM dahil); bastıysa True."""
+        for d in self.sayfa.get_by_role("button", name=CEREZ_DUGMESI).all()[:6]:
+            try:
+                if d.is_visible() and d.evaluate(CEREZ_BAGLAMI):
+                    d.click(timeout=3000)
+                    self.sayfa.wait_for_timeout(400)
+                    return True
+            except Exception:
+                continue
+        return False
 
     def yaz(self, no, metin, enter=False):
         loc = self._loc(no)

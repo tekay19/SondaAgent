@@ -1,0 +1,12 @@
+<!doctype html><html lang="tr"><meta charset="utf-8"><title>Gölge DOM çerez (Efilli benzeri)</title>
+<button id="devam" onclick="document.getElementById('sonuc').textContent = 'Devam edildi'">Devam et</button>
+<p id="sonuc"></p>
+<efilli-layout-dynamic id="cerez" style="position:fixed; inset:0; display:block"></efilli-layout-dynamic>
+<script>
+  const kok = document.getElementById("cerez").attachShadow({ mode: "open" });
+  kok.innerHTML = `<div style="position:fixed; inset:0; background:rgba(0,0,0,.6); display:grid; place-items:center">
+    <div style="background:#fff; padding:20px">Deneyiminizi iyileştirmek için çerezler kullanıyoruz. <a href="#">KVKK</a>
+      <button id="reddet">Reddet</button><button id="kabul">Tüm çerezleri kabul et</button></div></div>`;
+  kok.getElementById("kabul").onclick = () => document.getElementById("cerez").remove();
+  kok.getElementById("reddet").onclick = () => { document.getElementById("sonuc").textContent = "reddedildi"; };
+</script></html>
