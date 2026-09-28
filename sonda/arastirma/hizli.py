@@ -3,6 +3,7 @@ from .. import model as saglayici
 
 from ..ortak import SECENEKLER, bugun, json_sor
 from .araclar import ARACLAR, arac_calistir
+from .belge_baglami import belge_blogu, belge_ozeti
 from .kaynaklar import Kaynaklar
 from .promptlar import ARAMA_CALISMIYOR, ON_KARAR_PROMPTU, sistem_promptu
 
@@ -19,16 +20,19 @@ def gecmisi_hazirla(gecmis, onceki_kaynaklar):
     return hazir
 
 
-def hizli(soru, gecmis, model, onceki_kaynaklar=(), diger_sohbetler=()):
+def hizli(soru, gecmis, model, onceki_kaynaklar=(), diger_sohbetler=(), belgeler=()):
     kaynaklar = Kaynaklar(onceki_kaynaklar)
     gecmis = gecmisi_hazirla(gecmis, onceki_kaynaklar)
+    blok, olaylar = belge_blogu(belgeler, soru, model, kaynaklar)  # ekli belgeler: numaralı kaynaklar
+    yield from olaylar
     mesajlar = [{"role": "system", "content": sistem_promptu(diger_sohbetler)}, *gecmis,
-                {"role": "user", "content": soru}]
+                {"role": "user", "content": f"{blok}\n\nSORU: {soru}" if blok else soru}]
 
     # 1) Arama kararını modele bırakmadan orkestratör verir: model eski bilgisiyle cevaplamasın
     son = "\n".join(f"{m['role']}: {m['content'][:400]}" for m in gecmis[-4:])
+    ek = f"\n\n{belge_ozeti(belgeler)}" if belgeler else ""  # belgeden cevaplanabilen soruda arama yapılmaz
     karar = json_sor(model, ON_KARAR_PROMPTU.format(tarih=bugun()),
-                      f"Önceki konuşma:\n{son or '(yok)'}\n\nSon mesaj: {soru}")
+                      f"Önceki konuşma:\n{son or '(yok)'}{ek}\n\nSon mesaj: {soru}")
     dusunme = bool(karar.get("zor"))
     if karar.get("arama", True):
         sorgular = [q for q in karar.get("sorgular", []) if isinstance(q, str) and q.strip()][:3] or [soru]
@@ -37,14 +41,16 @@ def hizli(soru, gecmis, model, onceki_kaynaklar=(), diger_sohbetler=()):
         yield from olaylar
         # En iyi sonuçları doğrudan oku: özetler çoğu zaman ayrıntı için yetersiz
         en_iyiler = [k["url"] for k in kaynaklar.liste[:4]]
-        if not en_iyiler:
+        if not en_iyiler and not belgeler:
             # Model, boş aramada uyarılara rağmen eski bilgisiyle cevap uyduruyor ("henüz oynanmadı" gibi).
             # web_ara zaten yeniden denedi; sonuç yoksa model çağrılmadan dürüstçe söylenir.
             yield {"tur": "token", "metin": ARAMA_CALISMIYOR}
             yield {"tur": "cevap_bitti", "metin": ARAMA_CALISMIYOR}
             return
-        okuma_sonucu, olaylar = arac_calistir("sayfa_oku", {"urller": en_iyiler}, soru, kaynaklar)
-        yield from olaylar
+        okuma_sonucu = ""
+        if en_iyiler:
+            okuma_sonucu, olaylar = arac_calistir("sayfa_oku", {"urller": en_iyiler}, soru, kaynaklar)
+            yield from olaylar
         mesajlar.append({"role": "assistant", "content": "", "tool_calls": [
             {"function": {"name": "web_ara", "arguments": arg}},
             {"function": {"name": "sayfa_oku", "arguments": {"urller": en_iyiler}}}]})

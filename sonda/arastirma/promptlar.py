@@ -26,7 +26,10 @@ BİÇİM:
 - Kullanıcının biçim isteklerine (madde sayısı, uzunluk, dil, tablo) harfiyen uy.
 - Cevabı her zaman Türkçe (kullanıcı başka dil istemedikçe) ve düzenli Markdown ile yaz:
   önce kısa ve net cevap, sonra gerekirse ayrıntılar. Gereksiz uzatma.
-- Önceki konuşmayı dikkate al: "o", "bunu", "peki fiyatı" gibi ifadeler önceki mesajlara atıftır."""]
+- Önceki konuşmayı dikkate al: "o", "bunu", "peki fiyatı" gibi ifadeler önceki mesajlara atıftır.
+- Kullanıcı belge eklediyse: belgedeki bilgiyi belgenin kaynak numarasıyla, webden gelen bilgiyi web kaynağının
+  numarasıyla göster; hangi bilginin belgeden, hangisinin webden geldiği okurken anlaşılsın. Belgede yazmayanı
+  belgeye atfetme. Belge ile güncel bilgi çelişiyorsa bunu açıkça söyle."""]
     hafiza_metni = hafiza.istem_metni()
     if hafiza_metni:
         parcalar.append(hafiza_metni + "\nBu bilgileri gerektiğinde doğal şekilde kullan; her cevapta tekrarlama.")
@@ -43,6 +46,9 @@ ON_KARAR_PROMPTU = """Bugün {tarih}. Kullanıcının son mesajını analiz et. 
   "X tarihine kaç gün kaldı", "iki tarih arası kaç gün", "X tarihi haftanın hangi günü" (bunlar tarih aracıyla
   kesin hesaplanır; web sitelerindeki sayılar başka günde hesaplanmış olabilir). Bilgi, olay, ürün, kişi, fiyat, tarih, tavsiye, karşılaştırma
   veya herhangi bir gerçek içeren her soruda true. Emin değilsen true.
+  Kullanıcı belge eklediyse (EKLİ BELGELER verilir) ve soru yalnızca belgenin içeriğiyle cevaplanabiliyorsa
+  ("bu sözleşmede kira artışı kaç?", "belgeyi özetle") false; güncel yasa, fiyat, piyasa ya da belgede olmayan dış
+  bilgi gerekiyorsa ("yeni yasaya uygun mu?", "bu maaş piyasaya göre nasıl?") true.
 - haber: Son günlerin/haftaların olayları soruluyorsa true.
 - zor: Çok adımlı mantık, matematik problemi, bulmaca, tuzak soru, kod hata ayıklama veya dikkatli akıl yürütme
   gerektiriyorsa true.

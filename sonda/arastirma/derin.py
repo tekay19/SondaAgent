@@ -5,6 +5,7 @@ from .. import hafiza
 from ..ortak import SECENEKLER, bugun, json_sor
 from ..web import alan_adi, sayfalari_oku, web_ara
 from .araclar import arama_olayi
+from .belge_baglami import belge_blogu, belge_ozeti
 from .hizli import gecmisi_hazirla
 from .kaynaklar import Kaynaklar
 from .promptlar import EKSIK_PROMPTU, PLAN_PROMPTU, RAPOR_PROMPTU
@@ -37,11 +38,15 @@ def _alt_sorulari_arastir(liste, kaynaklar, okunan, bulgular):
                              "metin": "\n...\n".join(parcalar), "tam": bool(sayfa.get("parcalar"))})
 
 
-def derin(soru, gecmis, model, onceki_kaynaklar=(), diger_sohbetler=()):
+def derin(soru, gecmis, model, onceki_kaynaklar=(), diger_sohbetler=(), belgeler=()):
     kaynaklar, okunan, bulgular = Kaynaklar(onceki_kaynaklar), set(), []
     gecmis = gecmisi_hazirla(gecmis, onceki_kaynaklar)
     baglam = "\n".join(f"{m['role']}: {m['content'][:400]}" for m in gecmis[-4:])
     istek = f"Önceki konuşma:\n{baglam}\n\nAraştırma sorusu: {soru}" if baglam else soru
+    if belgeler:
+        istek = f"{belge_ozeti(belgeler)}\n\n{istek}"  # plan belgeyi bilsin: belgede olanı webde arama
+    belge_metni, olaylar = belge_blogu(belgeler, soru, model, kaynaklar)
+    yield from olaylar
 
     yield {"tur": "adim", "tip": "plan", "metin": "Araştırma planı hazırlanıyor"}
     plan = json_sor(model, PLAN_PROMPTU.format(tarih=bugun()), istek).get("alt_sorular", [])
@@ -62,6 +67,8 @@ def derin(soru, gecmis, model, onceki_kaynaklar=(), diger_sohbetler=()):
     # Tam okunan sayfalar önce, sonra sadece özeti olanlar
     bulgular.sort(key=lambda b: not b["tam"])
     metin = "\n\n".join(f"[{b['no']}] {b['baslik']} (konu: {b['alt_soru']})\n{b['metin']}" for b in bulgular)
+    if belge_metni:
+        metin = f"{belge_metni}\n\n{metin}"
     yield {"tur": "adim", "tip": "yaz", "metin": f"{len(kaynaklar.liste)} kaynaktan rapor yazılıyor"}
     hafiza_metni = hafiza.istem_metni()
     sistem = RAPOR_PROMPTU.format(tarih=bugun(), bulgular=metin[:60000],

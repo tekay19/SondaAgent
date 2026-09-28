@@ -186,3 +186,86 @@ def test_birden_cok_belge_sirasi_korunur(monkeypatch):
     monkeypatch.setattr(belge, "embed", _sahte_embed("x"))
     parcalar, tam = belge.baglam([_belge(["a1", "a2"], "a" * 32, "a.pdf"), _belge(["b1"], "b" * 32, "b.pdf")], "?", "qwen")
     assert tam and [(p["ad"], p["no"]) for p in parcalar] == [("a.pdf", 1), ("a.pdf", 2), ("b.pdf", 1)]
+
+
+# ---- araştırma modlarında belge
+import importlib
+
+hizli_mod = importlib.import_module("sonda.arastirma.hizli")  # paket "hizli" adıyla fonksiyonu dışa açar
+from sonda.arastirma.belge_baglami import belge_blogu, belge_ozeti
+from sonda.arastirma.kaynaklar import Kaynaklar
+from sonda.model import Parca
+
+
+def test_belge_parcasi_numarali_kaynak_olur():
+    k = Kaynaklar()
+    no, olay = k.belge_ekle({"belge_id": "a" * 32, "ad": "s.pdf", "birim": "sayfa", "no": 4, "metin": "Madde 4"})
+    assert no == 1 and olay["url"] == f"belge:{'a' * 32}#4" and olay["baslik"] == "s.pdf · s. 4"
+    assert olay["belge"] is True and olay["alan"] == "s.pdf" and olay["metin"] == "Madde 4"
+    assert k.belge_ekle({"belge_id": "a" * 32, "ad": "s.pdf", "birim": "sayfa", "no": 4, "metin": "x"})[1] is None
+
+
+def test_takip_sorusunda_belge_kaynagi_numarasini_korur():
+    onceki = [{"no": 3, "url": f"belge:{'a' * 32}#4", "baslik": "s.pdf · s. 4"}]
+    no, olay = Kaynaklar(onceki).belge_ekle({"belge_id": "a" * 32, "ad": "s.pdf", "birim": "sayfa", "no": 4, "metin": "x"})
+    assert no == 3 and olay["belge"] is True
+
+
+def test_belge_blogu_kaynak_numaralariyla():
+    k = Kaynaklar()
+    b = {"id": "a" * 32, "ad": "cv.docx", "birim": "bölüm", "sayfalar": [{"no": 1, "metin": "Python 5 yil"}]}
+    metin, olaylar = belge_blogu([b], "deneyim?", "qwen", k)
+    assert "[1] cv.docx · bölüm 1" in metin and "Python 5 yil" in metin and len(olaylar) == 1
+    assert belge_blogu([], "?", "qwen", k) == ("", [])
+
+
+def test_belge_ozeti_kisa():
+    b = {"id": "a" * 32, "ad": "s.pdf", "birim": "sayfa", "sayfalar": [{"no": 1, "metin": "x" * 5000}]}
+    ozet = belge_ozeti([b])
+    assert "s.pdf" in ozet and len(ozet) < 1700
+
+
+def test_hizli_modda_belgeden_cevaplanan_soruda_arama_yapilmaz(monkeypatch):
+    monkeypatch.setattr(hizli_mod, "json_sor", lambda *a, **k: {"arama": False})
+    monkeypatch.setattr(hizli_mod, "arac_calistir", lambda *a, **k: pytest.fail("arama yapılmamalı"))
+    istemler = []
+
+    def sohbet(model, mesajlar, **k):
+        istemler.append(mesajlar)
+        return iter([Parca("Kira artışı %25 [1].")])
+    monkeypatch.setattr(hizli_mod.saglayici, "sohbet", sohbet)
+    b = {"id": "a" * 32, "ad": "s.pdf", "birim": "sayfa", "sayfalar": [{"no": 4, "metin": "Madde 4 artis yuzde 25"}]}
+    olaylar = list(hizli_mod.hizli("kira artışı kaç?", [], "qwen", belgeler=[b]))
+    kaynak = [o for o in olaylar if o["tur"] == "kaynak"]
+    assert kaynak and kaynak[0]["belge"] is True and kaynak[0]["no"] == 1
+    assert "Madde 4 artis yuzde 25" in istemler[0][-1]["content"]
+    assert olaylar[-1] == {"tur": "cevap_bitti", "metin": "Kira artışı %25 [1]."}
+
+
+def test_on_karar_belge_ozetini_gorur(monkeypatch):
+    girdiler = []
+    monkeypatch.setattr(hizli_mod, "json_sor", lambda model, sistem, girdi: girdiler.append((sistem, girdi)) or {"arama": False})
+    monkeypatch.setattr(hizli_mod.saglayici, "sohbet", lambda *a, **k: iter([Parca("tamam")]))
+    b = {"id": "a" * 32, "ad": "kira.pdf", "birim": "sayfa", "sayfalar": [{"no": 1, "metin": "kira sozlesmesi"}]}
+    list(hizli_mod.hizli("uygun mu?", [], "qwen", belgeler=[b]))
+    assert "kira.pdf" in girdiler[0][1] and "kira sozlesmesi" in girdiler[0][1]
+    assert "belge" in girdiler[0][0].lower()
+
+
+derin_mod = importlib.import_module("sonda.arastirma.derin")
+
+
+def test_derin_modda_belge_kaynagi_ve_rapor_istemi(monkeypatch):
+    monkeypatch.setattr(derin_mod, "json_sor", lambda *a, **k: {})
+    monkeypatch.setattr(derin_mod, "web_ara", lambda *a, **k: [])
+    monkeypatch.setattr(derin_mod, "sayfalari_oku", lambda *a, **k: [])
+    istemler = []
+
+    def sohbet(model, mesajlar, **k):
+        istemler.append(mesajlar[0]["content"])
+        return iter([Parca("Rapor [1].")])
+    monkeypatch.setattr(derin_mod.saglayici, "sohbet", sohbet)
+    b = {"id": "a" * 32, "ad": "kira.pdf", "birim": "sayfa", "sayfalar": [{"no": 2, "metin": "Madde 2 depozito"}]}
+    olaylar = list(derin_mod.derin("depozito yasal mı?", [], "qwen", belgeler=[b]))
+    assert any(o["tur"] == "kaynak" and o.get("belge") and o["no"] == 1 for o in olaylar)
+    assert "Madde 2 depozito" in istemler[0]
