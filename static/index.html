@@ -900,7 +900,8 @@ function asistanGuncelle(d, m, canli) {
         ${sonMu ? `<button data-yenile title="Yeniden oluştur" aria-label="Yeniden oluştur">${ik("yenile")}</button>` : ""}
         ${iz.kaynaklar.length ? `<button data-kaynaklar title="Kaynaklar" aria-label="Kaynaklar">${ik("kitap")}</button>` : ""}
         <span class="ozet">${m.mod === "derin" ? "Derin araştırma" : ""}</span></div>`);
-  if (!canli && acikti) $(".iz", d).open = true;
+  const yeniIz = $(".iz", d);
+  if (!canli && acikti && yeniIz) yeniIz.open = true;
 }
 
 // ---------- kaynak çekmecesi

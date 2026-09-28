@@ -84,16 +84,14 @@ def calistir(soru, gecmis, model, mod, onceki_kaynaklar=(), diger_sohbetler=(), 
         if yuklu and mod == "gorev":
             yield {"tur": "adim", "tip": "belge", "metin": "Görev modunda ekli belgeler kullanılmaz"}
         if mod == "gorev":
-            # Görev modunda her mesaj tarayıcı açmasın: sohbet ve kısa bilgi soruları doğrudan cevaplanır
+            # Görev modunda sohbet mesajları tarayıcı açmadan cevaplanır; geri kalan her şey tarayıcıda yapılır
             hedef = yon_belirle(model, temiz_soru, temiz_gecmis)
             yield {"tur": "yon", "hedef": hedef}
             oneri = False
-            if hedef == "gorev":
-                uretec = gorev.calistir(soru, model, gecmis, serbest=serbest)  # görev şifreyi yer tutucuyla kendisi korur
-            elif hedef == "sohbet":
+            if hedef == "sohbet":
                 uretec = sohbet(temiz_soru, temiz_gecmis, model, onceki_kaynaklar, diger_sohbetler)
             else:
-                uretec = hizli(temiz_soru, temiz_gecmis, model, onceki_kaynaklar, diger_sohbetler)
+                uretec = gorev.calistir(soru, model, gecmis, serbest=serbest)  # görev şifreyi yer tutucuyla kendisi korur
         else:
             uretec = (derin if mod == "derin" else hizli)(temiz_soru, temiz_gecmis, model, onceki_kaynaklar,
                                                           diger_sohbetler, belgeler=yuklu)

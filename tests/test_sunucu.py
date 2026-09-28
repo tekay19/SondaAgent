@@ -72,9 +72,10 @@ def test_gorev_modunda_sohbet_mesaji_tarayici_acmaz(monkeypatch):
     assert olaylar[0] == {"tur": "yon", "hedef": "sohbet"}
 
 
-def test_gorev_modunda_bilgi_sorusu_hizli_aramaya_gider(monkeypatch):
-    cagri, olaylar = _yonlendir(monkeypatch, "bilgi")
-    assert cagri == {"hizli": True} and olaylar[0] == {"tur": "yon", "hedef": "bilgi"}
+def test_gorev_modunda_bilgi_sorusu_de_tarayiciya_gider(monkeypatch):
+    from sonda import yonlendirme
+    monkeypatch.setattr(yonlendirme, "json_sor", lambda *a: {"hedef": "bilgi"})
+    assert yonlendirme.yon_belirle("m", "dolar kaç?", []) == "gorev"
 
 
 def test_gorev_modunda_gorev_tarayiciya_gider(monkeypatch):

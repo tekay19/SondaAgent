@@ -1,20 +1,20 @@
-"""Görev modunda gelen mesajın ne olduğuna karar verir: tarayıcı görevi, sohbet ya da hızlı bilgi sorusu.
+"""Görev modunda gelen mesajın ne olduğuna karar verir: tarayıcı görevi ya da sohbet.
 Böylece "teşekkürler" ya da "tabloyu kısalt" gibi mesajlar tarayıcı açmadan cevaplanır."""
 from .model import ModelHatasi
 from .ortak import bugun, json_sor
 
-HEDEFLER = ("gorev", "sohbet", "bilgi")
+HEDEFLER = ("gorev", "sohbet")
 
 YON_PROMPTU = """Bugün {tarih}. Kullanıcı Sonda'nın "Görev" modunda bir mesaj yazdı. Sonda bu modda kullanıcının
-tarayıcısında sitelere girip iş yapabilir. Mesajın ne olduğuna karar ver. Sadece JSON: {{"hedef": "gorev|sohbet|bilgi"}}
-- gorev: tarayıcıda sitelere girip gezinmek, aramak, incelemek, karşılaştırmak, form doldurmak, hesapta/profilde
-  bir şeye bakmak ya da düzenlemek, sepete eklemek gereken iş. Önceki görevin devamı olan yeni bir tarayıcı işi de
-  gorev'dir ("şimdi ikincisini sepete ekle", "aynısını Amazon'da da bak").
-- sohbet: selam, teşekkür, onay; önceki cevap hakkında soru, yorum ya da düzenleme isteği ("hangisi daha iyi?",
-  "tabloyu kısalt", "neden öyle dedin?"); önceki konuşmadan cevaplanabilecek her şey.
-- bilgi: tek bir güncel bilgi ya da kısa bir soru ("dolar kaç?", "yarın İzmir'de hava nasıl?"); siteye girip işlem
-  yapmadan web aramasıyla cevaplanabilir.
-Emin değilsen: mesaj önceki cevaba dayanıyorsa sohbet, yoksa gorev."""
+tarayıcısında sitelere girip iş yapabilir. Mesajın ne olduğuna karar ver. Sadece JSON: {{"hedef": "gorev|sohbet"}}
+- gorev: varsayılan. Tarayıcıda sitelere girip gezinmek, aramak, incelemek, karşılaştırmak, form doldurmak,
+  hesapta/profilde bir şeye bakmak ya da düzenlemek, sepete eklemek, bir sitede bir şey açmak/oluşturmak. Yeni
+  bilgi gerektiren her soru da gorev'dir ("dolar kaç?", "nasıl yapılır?"): tarayıcıda Google'da aranır. Önceki
+  konuşmayla ilgili olsa bile yeni bir iş ya da yeni bilgi isteyen mesaj gorev'dir ("şimdi ikincisini sepete ekle",
+  "aynısını Amazon'da da bak", "tamam şimdi aç", "sen yap", "gir ve oluştur").
+- sohbet: SADECE selam, teşekkür, "tamam" gibi kısa onaylar ya da önceki cevabın kendisini yeniden biçimlendirme /
+  açıklama isteği ("tabloyu kısalt", "neden öyle dedin?", "bunu İngilizceye çevir").
+Emin değilsen gorev."""
 
 
 def yon_belirle(model, soru, gecmis):

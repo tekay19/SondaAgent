@@ -1,6 +1,7 @@
 """Kullanıcının Chrome'una CDP bağlantısı. Chrome her yeni bağlantıda izin istediği için bağlantı saklanır."""
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -18,7 +19,15 @@ YEDEK_PROFIL = KOK / "veri" / "chrome-profil"
 YEDEK_PORT = 9223
 
 
-CHROME = Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "Google/Chrome/Application/chrome.exe"
+if sys.platform == "darwin":
+    CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+    CHROME_VERI = Path.home() / "Library/Application Support/Google/Chrome"
+elif sys.platform.startswith("linux"):
+    CHROME = Path("/usr/bin/google-chrome")
+    CHROME_VERI = Path.home() / ".config/google-chrome"
+else:
+    CHROME = Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "Google/Chrome/Application/chrome.exe"
+    CHROME_VERI = Path(os.environ.get("LOCALAPPDATA", "")) / "Google/Chrome/User Data"
 
 
 class BaglantiHatasi(Exception):
@@ -26,7 +35,7 @@ class BaglantiHatasi(Exception):
 
 
 def _cdp_adresi():
-    dosya = Path(os.environ.get("LOCALAPPDATA", "")) / "Google/Chrome/User Data/DevToolsActivePort"
+    dosya = CHROME_VERI / "DevToolsActivePort"
     adresler = []
     if dosya.exists():
         satirlar = dosya.read_text().split("\n")
