@@ -2,6 +2,16 @@
 
 *Son güncelleme: 28 Eylül 2026*
 
+## 000. Sohbete belge ekleme (A) — tamamlandı
+
+PDF (metinli), Word, .txt, .md sohbete eklenir (ataç ya da sürükle-bırak; en çok 5 belge, 20 MB). Kısa belge modele
+tamamen, uzun belge `bge-m3` ile soruya en yakın parçalarla gider (Gemini 60 bin, yerel 15 bin karakter). Ön karar
+belgeden cevaplanabilen soruda web araması yapmaz; belge kaynakları 📄 "ad · s. N" olarak numaralı kaynak listesine
+girer. Yerel modelde belge bilgisayardan çıkmaz; Gemini seçiliyse arayüz uyarır. Tasarım:
+`docs/superpowers/specs/2026-09-28-belge-ekleme-design.md`.
+Canlı deneme: Gemini Flash ile .docx kira sözleşmesi: "3 maddede özetle" 9 sn, web araması yok, 📄 kaynaklı ve doğru. "Madde 4 yasal sınıra uygun mu?" web aramasını doğru başlattı (10 kaynak) ama sayfa okumada `bge-m3 not found` hatası: Ollama'daki modeller (qwen'ler ve bge-m3) silinmiş görünüyor; web sayfası okuma (`web.alakali_parcalar`) embedding yedeği olmadığı için Gemini'de de düşüyor. Yerel model senaryosu model olmadığından denenemedi.
+Sıradaki: oturumu açık sitelerden okuma ve analiz (Upwork, e-Devlet, banka ekstresi).
+
 ## 00. Görev modu gerçek testleri (26 Eylül)
 
 "Butonlara kendisi bassın" kutucuğu gerçek sitelerde, Gemini Flash ile test edildi. Toplu çalıştırıcı:
@@ -127,6 +137,8 @@ Perplexity veya ChatGPT'nin kopyası olmak yerine, Sonda'nın onlarda olmayan ü
 **Hazır olan altyapı:** PDF okuma (`pypdf`), metni parçalara bölme ve anlamsal arama (`bge-m3`, `webtools.py`). Web sayfaları için kullanılan parçalar belgeler için de kullanılabilir.
 
 ### Açık soru 1 (sıradaki karar): Belgeler Sonda'ya nasıl gelsin?
+
+**Karar (28 Eylül):** A teslim edildi; B sonra.
 
 - **A) Sohbete ekleme:** Dosyayı sürükle-bırak ya da ataç simgesiyle sohbete eklersin; dosya o sohbete ait olur. Basit ve tanıdık.
 - **B) Belge kütüphanesi:** "Belgelerim" klasörünü bir kez gösterirsin; Sonda tüm dosyaları arka planda dizinler ve hangi sohbette olursan ol ilgili belgeyi kendisi bulur. Daha güçlü, daha büyük bir iş.
