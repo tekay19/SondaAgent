@@ -10,13 +10,15 @@ import re
 import threading
 import time
 
-from . import gorev, hafiza, koruma
+from . import belge, gorev, hafiza, koruma
 from .arastirma import derin, hizli, sohbet
 from .arastirma.promptlar import HAFIZA_PROMPTU, ONERI_PROMPTU
 from .model import ModelHatasi
 from .ortak import json_sor
 from .yonlendirme import yon_belirle
 
+
+EN_FAZLA_BELGE = 5
 
 # Birinci şahıs ifadeleri: hafıza çıkarımı sadece bunlar varsa çalışır (gereksiz model çağrısını önler)
 _KISISEL = re.compile(r"\b(ben|benim|bana|beni|bende|adım|ismim|hatırla|unutma|bizim|eşim|oğlum|kızım)\b|"
@@ -63,7 +65,8 @@ def baslik_uret(model, soru):
     return baslik[:60] or soru[:60]
 
 
-def calistir(soru, gecmis, model, mod, onceki_kaynaklar=(), diger_sohbetler=(), oneri=True, serbest=False):
+def calistir(soru, gecmis, model, mod, onceki_kaynaklar=(), diger_sohbetler=(), oneri=True, serbest=False,
+             belgeler=()):
     basla = time.time()
     cevap = ""
     gizliler = set().union(koruma.gizli_adaylar(soru), *(koruma.gizli_adaylar(m["content"]) for m in gecmis),
@@ -72,6 +75,14 @@ def calistir(soru, gecmis, model, mod, onceki_kaynaklar=(), diger_sohbetler=(), 
     temiz_gecmis = [{**m, "content": sifresiz(m["content"], gizliler)} for m in gecmis]
     diger_sohbetler = [sifresiz(b, gizliler) for b in diger_sohbetler]  # başlık ilk mesajdan kesilmiş olabilir
     try:
+        yuklu = []  # sohbete eklenen belgeler (en çok EN_FAZLA_BELGE); silinmiş olan arayüze bildirilir
+        for kimlik in list(belgeler)[:EN_FAZLA_BELGE]:
+            if b := belge.yukle(kimlik):
+                yuklu.append(b)
+            else:
+                yield {"tur": "belge_yok", "id": kimlik}
+        if yuklu and mod == "gorev":
+            yield {"tur": "adim", "tip": "belge", "metin": "Görev modunda ekli belgeler kullanılmaz"}
         if mod == "gorev":
             # Görev modunda her mesaj tarayıcı açmasın: sohbet ve kısa bilgi soruları doğrudan cevaplanır
             hedef = yon_belirle(model, temiz_soru, temiz_gecmis)
@@ -85,7 +96,7 @@ def calistir(soru, gecmis, model, mod, onceki_kaynaklar=(), diger_sohbetler=(), 
                 uretec = hizli(temiz_soru, temiz_gecmis, model, onceki_kaynaklar, diger_sohbetler)
         else:
             uretec = (derin if mod == "derin" else hizli)(temiz_soru, temiz_gecmis, model, onceki_kaynaklar,
-                                                          diger_sohbetler)
+                                                          diger_sohbetler, belgeler=yuklu)
         for olay in uretec:
             if olay["tur"] == "cevap_bitti":
                 cevap = olay["metin"]

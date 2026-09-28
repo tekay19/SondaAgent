@@ -243,3 +243,81 @@ def test_serbest_izni_istekten_goreve_gecer(monkeypatch):
     monkeypatch.setattr(asistan, "yon_belirle", lambda *a: "gorev")
     istemci.post("/api/sor", json={"soru": "başvur", "model": "m", "mod": "gorev", "serbest": True}).read()
     assert cagri["serbest"] is True
+
+
+# ---- belge ekleme
+from sonda import belge
+
+
+def test_belge_yukle_ve_sil():
+    y = istemci.post("/api/belge", files={"dosya": ("not.txt", "Kira artışı yüzde 25".encode(), "text/plain")})
+    assert y.status_code == 200
+    ozet = y.json()
+    assert ozet["ad"] == "not.txt" and ozet["sayfa_sayisi"] == 1 and len(ozet["id"]) == 32
+    assert belge.yukle(ozet["id"]) is not None
+    assert istemci.delete(f"/api/belge/{ozet['id']}").json() == {"tamam": True}
+    assert belge.yukle(ozet["id"]) is None
+
+
+def test_belge_hatasi_turkce_400():
+    y = istemci.post("/api/belge", files={"dosya": ("resim.png", b"\x89PNG", "image/png")})
+    assert y.status_code == 400 and "yalnızca PDF" in y.json()["detail"]
+
+
+def test_buyuk_belge_400(monkeypatch):
+    monkeypatch.setattr(belge, "EN_BUYUK_DOSYA", 10)
+    y = istemci.post("/api/belge", files={"dosya": ("a.txt", b"x" * 11, "text/plain")})
+    assert y.status_code == 400 and "MB" in y.json()["detail"]
+
+
+def test_gecersiz_kimlikle_silme():
+    assert istemci.delete("/api/belge/..ayarlar").json() == {"tamam": False}
+    y = istemci.delete("/api/belge/..%2Fayarlar")  # yönlendirici bölü işaretini çözer: uç noktaya hiç ulaşmaz
+    assert y.status_code == 404
+
+
+def _belgeli_calistir(monkeypatch, mod, kimlikler):
+    cagri = {}
+
+    def sahte(soru, gecmis, model, onceki=(), diger=(), belgeler=()):
+        cagri["belgeler"] = belgeler
+        yield {"tur": "cevap_bitti", "metin": "ok"}
+    monkeypatch.setattr(asistan, "hizli", sahte)
+    monkeypatch.setattr(asistan, "derin", sahte)
+    monkeypatch.setattr(asistan, "hafizayi_guncelle", lambda *a: None)
+    olaylar = list(asistan.calistir("soru", [], "m", mod, oneri=False, belgeler=kimlikler))
+    return cagri, olaylar
+
+
+def test_calistir_belgeleri_yukleyip_moda_gecirir(monkeypatch):
+    b = belge.kaydet(belge.oku("a.txt", b"metin"))
+    cagri, olaylar = _belgeli_calistir(monkeypatch, "hizli", [b["id"], "f" * 32])
+    assert [x["id"] for x in cagri["belgeler"]] == [b["id"]]
+    assert {"tur": "belge_yok", "id": "f" * 32} in olaylar
+    cagri, _ = _belgeli_calistir(monkeypatch, "derin", [b["id"]])
+    assert [x["id"] for x in cagri["belgeler"]] == [b["id"]]
+
+
+def test_calistir_en_fazla_bes_belge(monkeypatch):
+    kimlikler = [belge.kaydet(belge.oku(f"{i}.txt", b"m"))["id"] for i in range(7)]
+    cagri, _ = _belgeli_calistir(monkeypatch, "hizli", kimlikler)
+    assert len(cagri["belgeler"]) == 5
+
+
+def test_gorev_modunda_belge_kullanilmaz_ve_soylenir(monkeypatch):
+    b = belge.kaydet(belge.oku("a.txt", b"metin"))
+    monkeypatch.setattr(gorev, "calistir", lambda *a, **k: iter([{"tur": "cevap_bitti", "metin": ""}]))
+    monkeypatch.setattr(asistan, "yon_belirle", lambda *a: "gorev")
+    olaylar = list(asistan.calistir("ssd bul", [], "m", "gorev", belgeler=[b["id"]]))
+    assert any(o["tur"] == "adim" and o.get("tip") == "belge" and "Görev modunda" in o["metin"] for o in olaylar)
+
+
+def test_sor_istegi_belgeleri_iletir(monkeypatch):
+    gelen = {}
+
+    def sahte(*a, **k):
+        gelen.update(k)
+        yield {"tur": "bitti", "sure": 0}
+    monkeypatch.setattr(sunucu, "calistir", sahte)
+    istemci.post("/api/sor", json={"soru": "s", "model": "m", "belgeler": ["a" * 32]}).read()
+    assert gelen["belgeler"] == ["a" * 32]

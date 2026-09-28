@@ -4,13 +4,13 @@ from pathlib import Path
 
 import ollama
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel
 
-from . import ayarlar, gorev, hafiza
+from . import ayarlar, belge, gorev, hafiza
 from .asistan import baslik_uret, calistir, sifresiz
 from .model import ModelHatasi, gemini_saglayici
 
@@ -36,6 +36,7 @@ class Istek(BaseModel):
     onceki_kaynaklar: list[dict] = []   # son cevabın kaynakları (takip soruları için)
     diger_sohbetler: list[str] = []     # diğer sohbetlerin başlıkları
     serbest: bool = False               # görev: son adım butonlarına Sonda kendisi basabilir (para hariç)
+    belgeler: list[str] = []            # sohbete eklenen belge kimlikleri
 
 
 @app.get("/")
@@ -133,6 +134,20 @@ def gorev_komutu(gorev_id: str, komut: str):
     return {"tamam": gorev.komut_ver(gorev_id, komut)}
 
 
+@app.post("/api/belge")
+async def belge_yukle(dosya: UploadFile = File(...)):
+    veri = await dosya.read(belge.EN_BUYUK_DOSYA + 1)  # sınırdan fazlası okunmaz
+    try:
+        return belge.ozet(belge.kaydet(belge.oku(dosya.filename, veri)))
+    except belge.BelgeHatasi as h:
+        raise HTTPException(400, str(h))
+
+
+@app.delete("/api/belge/{kimlik}")
+def belge_sil(kimlik: str):
+    return {"tamam": belge.sil(kimlik)}
+
+
 @app.post("/api/sor")
 def sor(istek: Istek):
     gecmis = [{"role": m["role"], "content": m["content"]} for m in istek.gecmis
@@ -140,7 +155,8 @@ def sor(istek: Istek):
 
     def olaylar():
         for olay in calistir(istek.soru, gecmis, istek.model, istek.mod,
-                             istek.onceki_kaynaklar, istek.diger_sohbetler, serbest=istek.serbest):
+                             istek.onceki_kaynaklar, istek.diger_sohbetler, serbest=istek.serbest,
+                             belgeler=istek.belgeler):
             yield f"data: {json.dumps(olay, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(olaylar(), media_type="text/event-stream",
