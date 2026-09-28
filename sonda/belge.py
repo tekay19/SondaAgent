@@ -9,7 +9,6 @@ from pathlib import Path, PureWindowsPath
 
 import numpy as np
 from pypdf import PdfReader
-from pypdf.errors import PdfReadError
 
 from .web import embed, kelime_puani
 
@@ -37,7 +36,7 @@ def _pdf(veri):
         ham = [(i, (s.extract_text() or "").strip()) for i, s in enumerate(okuyucu.pages, 1)]
     except BelgeHatasi:
         raise
-    except (PdfReadError, ValueError, KeyError, TypeError) as h:
+    except Exception as h:  # pypdf bozuk dosyada PdfReadError dışında AttributeError, IndexError, zlib.error... atar
         raise BelgeHatasi(f"Bu dosyayı okuyamadım: {h}") from h
     dolu = [(i, m) for i, m in ham if len(m) >= _BOS_SAYFA]
     if not ham or len(dolu) < max(1, _TARANMIS_ORAN * len(ham)):
@@ -158,9 +157,9 @@ def _parcalar(belgeler):
                     yield {"belge_id": b["id"], "ad": b["ad"], "birim": b["birim"], "no": s["no"], "metin": parca}
 
 
-def baglam(belgeler, soru, model):
+def baglam(belgeler, soru, model, sinir=None):
     """(parçalar, tam): kısa belgeler tamamen; uzunsa soruya en yakın parçalar, sınırı aşmadan, belge/sayfa sırasında."""
-    sinir = baglam_siniri(model)
+    sinir = sinir or baglam_siniri(model)
     if sum(len(s["metin"]) for b in belgeler for s in b["sayfalar"]) <= sinir:
         return [{"belge_id": b["id"], "ad": b["ad"], "birim": b["birim"], "no": s["no"], "metin": s["metin"]}
                 for b in belgeler for s in b["sayfalar"]], True

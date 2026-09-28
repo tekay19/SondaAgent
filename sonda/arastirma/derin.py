@@ -6,6 +6,8 @@ from ..ortak import SECENEKLER, bugun, json_sor
 from ..web import alan_adi, sayfalari_oku, web_ara
 from .araclar import arama_olayi
 from .belge_baglami import belge_blogu, belge_ozeti
+
+RAPOR_SINIRI = 60000  # rapor istemine giden bulgular (karakter)
 from .hizli import gecmisi_hazirla
 from .kaynaklar import Kaynaklar
 from .promptlar import EKSIK_PROMPTU, PLAN_PROMPTU, RAPOR_PROMPTU
@@ -45,7 +47,8 @@ def derin(soru, gecmis, model, onceki_kaynaklar=(), diger_sohbetler=(), belgeler
     istek = f"Önceki konuşma:\n{baglam}\n\nAraştırma sorusu: {soru}" if baglam else soru
     if belgeler:
         istek = f"{belge_ozeti(belgeler)}\n\n{istek}"  # plan belgeyi bilsin: belgede olanı webde arama
-    belge_metni, olaylar = belge_blogu(belgeler, soru, model, kaynaklar)
+    # Belge rapor bütçesinin en çok yarısını alır: web bulguları istemden düşmesin
+    belge_metni, olaylar = belge_blogu(belgeler, soru, model, kaynaklar, sinir=RAPOR_SINIRI // 2)
     yield from olaylar
 
     yield {"tur": "adim", "tip": "plan", "metin": "Araştırma planı hazırlanıyor"}
@@ -68,10 +71,10 @@ def derin(soru, gecmis, model, onceki_kaynaklar=(), diger_sohbetler=(), belgeler
     bulgular.sort(key=lambda b: not b["tam"])
     metin = "\n\n".join(f"[{b['no']}] {b['baslik']} (konu: {b['alt_soru']})\n{b['metin']}" for b in bulgular)
     if belge_metni:
-        metin = f"{belge_metni}\n\n{metin}"
+        metin = f"{belge_metni}\n\n{metin[:RAPOR_SINIRI - len(belge_metni) - 2]}"
     yield {"tur": "adim", "tip": "yaz", "metin": f"{len(kaynaklar.liste)} kaynaktan rapor yazılıyor"}
     hafiza_metni = hafiza.istem_metni()
-    sistem = RAPOR_PROMPTU.format(tarih=bugun(), bulgular=metin[:60000],
+    sistem = RAPOR_PROMPTU.format(tarih=bugun(), bulgular=metin[:RAPOR_SINIRI],
                                   hafiza=f"\n{hafiza_metni}\n" if hafiza_metni else "")
     akis = saglayici.sohbet(model, [{"role": "system", "content": sistem}, *gecmis[-4:],
                                     {"role": "user", "content": soru}], akis=True, secenekler=SECENEKLER)

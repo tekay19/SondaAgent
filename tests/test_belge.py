@@ -282,3 +282,79 @@ def test_web_sayfa_parcalari_embedding_yoksa_kelimeyle_secilir(monkeypatch):
         + " ".join(["dolgu metni burada uzun uzun devam ediyor."] * 200)
     parcalar = web.alakali_parcalar(metin, "kira artış sınırı", adet=3)
     assert len(parcalar) == 3 and any("TÜFE" in p for p in parcalar)
+
+
+# ---- son inceleme bulguları
+def _cok_sayfali(n=5):
+    return {"id": "a" * 32, "ad": "uzun.pdf", "birim": "sayfa",
+            "sayfalar": [{"no": i, "metin": f"Sayfa {i} madde metni"} for i in range(1, n + 1)]}
+
+
+def _sahte_araclar(okunan, web_sonucu=True):
+    def arac(ad, arg, soru, kaynaklar):
+        if ad == "web_ara":
+            if web_sonucu:
+                for i in range(5):
+                    kaynaklar.ekle(f"https://site{i}.com/yasa", f"Site {i}")
+            return ("arama sonuçları" if web_sonucu else "(sonuç yok)"), []
+        okunan.append(list(arg["urller"]))
+        return "okunan sayfalar", []
+    return arac
+
+
+def test_hizli_modda_belge_varken_web_sayfalari_da_okunur(monkeypatch):
+    """İnceleme: belge sayfaları kaynak listesinin başını doldurunca hiçbir web sayfası okunmuyordu."""
+    okunan = []
+    monkeypatch.setattr(hizli_mod, "json_sor", lambda *a, **k: {"arama": True, "sorgular": ["yasa"]})
+    monkeypatch.setattr(hizli_mod, "arac_calistir", _sahte_araclar(okunan))
+    monkeypatch.setattr(hizli_mod.saglayici, "sohbet", lambda *a, **k: iter([Parca("tamam")]))
+    list(hizli_mod.hizli("yasaya uygun mu?", [], "qwen", belgeler=[_cok_sayfali()]))
+    assert okunan and okunan[0] and all(u.startswith("https://") for u in okunan[0])
+
+
+def test_hizli_modda_web_bossa_belgeyle_devam_eder_ve_modele_soylenir(monkeypatch):
+    """İnceleme: web boşken modele boş sayfa_oku çağrısı gidiyordu; web kısmını uydurmasın diye açıkça söylenmeli."""
+    okunan, mesajlar_ = [], []
+    monkeypatch.setattr(hizli_mod, "json_sor", lambda *a, **k: {"arama": True, "sorgular": ["yasa"]})
+    monkeypatch.setattr(hizli_mod, "arac_calistir", _sahte_araclar(okunan, web_sonucu=False))
+
+    def sohbet(model, mesajlar, **k):
+        mesajlar_.append(mesajlar)
+        return iter([Parca("belgeye göre")])
+    monkeypatch.setattr(hizli_mod.saglayici, "sohbet", sohbet)
+    olaylar = list(hizli_mod.hizli("yasaya uygun mu?", [], "qwen", belgeler=[_cok_sayfali(1)]))
+    assert okunan == [] and olaylar[-1]["metin"] == "belgeye göre"
+    gonderilen = mesajlar_[0]
+    assert not any(c["function"]["name"] == "sayfa_oku" for m in gonderilen for c in m.get("tool_calls", []))
+    assert any("web araması sonuç vermedi" in str(m.get("content", "")).lower() for m in gonderilen)
+
+
+def test_derin_modda_uzun_belge_web_bulgularini_silmez(monkeypatch):
+    """İnceleme: Gemini sınırında belge 60 bin karakteri doldurunca web bulguları rapor isteminden düşüyordu."""
+    monkeypatch.setattr(derin_mod, "json_sor", lambda *a, **k: {"alt_sorular": [{"soru": "yasa", "sorgu": "yasa"}]})
+    monkeypatch.setattr(derin_mod, "web_ara", lambda *a, **k: [{"url": "https://yasa.gov.tr/a", "baslik": "Yasa",
+                                                                "ozet": "WEBBULGUSU konut kira artis tavani 12 aylik TUFE ortalamasidir"}])
+    monkeypatch.setattr(derin_mod, "sayfalari_oku", lambda *a, **k: [])
+    istemler = []
+    monkeypatch.setattr(derin_mod.saglayici, "sohbet", lambda m, mesajlar, **k: istemler.append(mesajlar[0]["content"]) or iter([Parca("r")]))
+    uzun = {"id": "a" * 32, "ad": "uzun.pdf", "birim": "sayfa",
+            "sayfalar": [{"no": i, "metin": "belge " * 2000} for i in range(1, 7)]}  # ~72 bin karakter
+    list(derin_mod.derin("yasal mı?", [], "gemini:gemini-flash-latest", belgeler=[uzun]))
+    assert "WEBBULGUSU" in istemler[0]
+
+
+def test_onceki_belge_kaynagina_yeniden_atif_belge_olarak_kalir():
+    """İnceleme: takip cevabında önceki [2] belge kaynağına atıf, kırık bir web bağlantısına dönüşüyordu."""
+    onceki = [{"no": 2, "url": f"belge:{'a' * 32}#3", "baslik": "s.pdf · s. 3"}]
+    olaylar = list(Kaynaklar(onceki).atiflari_ekle("Artış %25 [2]."))
+    assert olaylar and olaylar[0]["belge"] is True and olaylar[0]["alan"] == "s.pdf"
+
+
+def test_bozuk_pdf_her_hatada_turkce_mesaj(monkeypatch):
+    """İnceleme: pypdf'in AttributeError/IndexError gibi hataları 500 ve yanlış mesaj veriyordu."""
+    class Bozuk:
+        def __init__(self, *a, **k):
+            raise AttributeError("'NoneType' object has no attribute 'get_object'")
+    monkeypatch.setattr(belge, "PdfReader", Bozuk)
+    with pytest.raises(belge.BelgeHatasi, match="okuyamadım"):
+        belge.oku("bozuk.pdf", b"%PDF-1.4 bozuk")

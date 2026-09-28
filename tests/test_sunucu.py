@@ -321,3 +321,9 @@ def test_sor_istegi_belgeleri_iletir(monkeypatch):
     monkeypatch.setattr(sunucu, "calistir", sahte)
     istemci.post("/api/sor", json={"soru": "s", "model": "m", "belgeler": ["a" * 32]}).read()
     assert gelen["belgeler"] == ["a" * 32]
+
+
+def test_belge_yukleme_olay_dongusunu_kilitlemez():
+    """İnceleme: 20 MB PDF'i ayrıştırmak async uç noktada akan cevabı donduruyordu; iş parçacığında çalışmalı."""
+    import inspect
+    assert not inspect.iscoroutinefunction(sunucu.belge_yukle)

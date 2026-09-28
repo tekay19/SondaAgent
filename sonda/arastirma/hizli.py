@@ -9,6 +9,8 @@ from .promptlar import ARAMA_CALISMIYOR, ON_KARAR_PROMPTU, sistem_promptu
 
 
 MAKS_ARAC_TURU = 10
+WEB_BOS_BELGE_VAR = ("(Not: web araması sonuç vermedi. Cevabı yalnızca ekli belgeye dayandır; güncel/dış bilgi "
+                     "gerektiren kısım için webde bulamadığını açıkça söyle, kendi bilginle doldurma.)")
 
 
 def gecmisi_hazirla(gecmis, onceki_kaynaklar):
@@ -40,23 +42,25 @@ def hizli(soru, gecmis, model, onceki_kaynaklar=(), diger_sohbetler=(), belgeler
         arama_sonucu, olaylar = arac_calistir("web_ara", arg, soru, kaynaklar)
         yield from olaylar
         # En iyi sonuçları doğrudan oku: özetler çoğu zaman ayrıntı için yetersiz
-        en_iyiler = [k["url"] for k in kaynaklar.liste[:4]]
+        # Belge sayfaları da kaynak listesinde: okunacaklar yalnızca web sonuçları
+        en_iyiler = [k["url"] for k in kaynaklar.liste if not k.get("belge")][:4]
         if not en_iyiler and not belgeler:
             # Model, boş aramada uyarılara rağmen eski bilgisiyle cevap uyduruyor ("henüz oynanmadı" gibi).
             # web_ara zaten yeniden denedi; sonuç yoksa model çağrılmadan dürüstçe söylenir.
             yield {"tur": "token", "metin": ARAMA_CALISMIYOR}
             yield {"tur": "cevap_bitti", "metin": ARAMA_CALISMIYOR}
             return
-        okuma_sonucu = ""
-        if en_iyiler:
+        if not en_iyiler:  # belge var, web boş: belgeyle cevaplanır ama web kısmı hafızadan uydurulmasın
+            mesajlar[-1] = {**mesajlar[-1], "content": f"{mesajlar[-1]['content']}\n\n{WEB_BOS_BELGE_VAR}"}
+        else:
             okuma_sonucu, olaylar = arac_calistir("sayfa_oku", {"urller": en_iyiler}, soru, kaynaklar)
             yield from olaylar
-        mesajlar.append({"role": "assistant", "content": "", "tool_calls": [
-            {"function": {"name": "web_ara", "arguments": arg}},
-            {"function": {"name": "sayfa_oku", "arguments": {"urller": en_iyiler}}}]})
-        mesajlar.append({"role": "tool", "content": arama_sonucu[:12000], "tool_name": "web_ara"})
-        mesajlar.append({"role": "tool", "content": okuma_sonucu[:16000] or "(okunacak sayfa yok)",
-                         "tool_name": "sayfa_oku"})
+            mesajlar.append({"role": "assistant", "content": "", "tool_calls": [
+                {"function": {"name": "web_ara", "arguments": arg}},
+                {"function": {"name": "sayfa_oku", "arguments": {"urller": en_iyiler}}}]})
+            mesajlar.append({"role": "tool", "content": arama_sonucu[:12000], "tool_name": "web_ara"})
+            mesajlar.append({"role": "tool", "content": okuma_sonucu[:16000] or "(okunacak sayfa yok)",
+                             "tool_name": "sayfa_oku"})
     yield from _dongu(mesajlar, soru, model, dusunme, kaynaklar)
 
 

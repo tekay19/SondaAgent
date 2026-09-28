@@ -135,8 +135,9 @@ def gorev_komutu(gorev_id: str, komut: str):
 
 
 @app.post("/api/belge")
-async def belge_yukle(dosya: UploadFile = File(...)):
-    veri = await dosya.read(belge.EN_BUYUK_DOSYA + 1)  # sınırdan fazlası okunmaz
+def belge_yukle(dosya: UploadFile = File(...)):
+    # async değil: FastAPI iş parçacığında çalıştırır; büyük PDF'i ayrıştırmak akan cevabı dondurmaz
+    veri = dosya.file.read(belge.EN_BUYUK_DOSYA + 1)  # sınırdan fazlası okunmaz
     try:
         return belge.ozet(belge.kaydet(belge.oku(dosya.filename, veri)))
     except belge.BelgeHatasi as h:

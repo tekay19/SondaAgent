@@ -4,11 +4,11 @@ from .. import belge as belge_
 OZET = 1500
 
 
-def belge_blogu(belgeler, soru, model, kaynaklar):
+def belge_blogu(belgeler, soru, model, kaynaklar, sinir=None):
     """(istem metni, kaynak olayları). Aynı sayfanın parçaları tek kaynak numarası altında birleşir."""
     if not belgeler:
         return "", []
-    parcalar, tam = belge_.baglam(belgeler, soru, model)
+    parcalar, tam = belge_.baglam(belgeler, soru, model, sinir)
     olaylar, bloklar = [], {}
     for p in parcalar:
         no, olay = kaynaklar.belge_ekle(p)

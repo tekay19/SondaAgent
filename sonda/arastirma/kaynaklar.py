@@ -27,6 +27,10 @@ class Kaynaklar:
         return no, self._kaydet(no, url, baslik)
 
     def _kaydet(self, no, url, baslik):
+        if url.startswith("belge:"):  # takipte yeniden atıf yapılan önceki belge kaynağı web bağlantısı sayılmasın
+            kayit = {"no": no, "url": url, "baslik": baslik, "alan": baslik.split(" · ")[0], "belge": True, "metin": ""}
+            self.liste.append(kayit)
+            return {"tur": "kaynak", **kayit}
         kayit = {"no": no, "url": url, "baslik": baslik, "alan": alan_adi(url)}
         self.liste.append(kayit)
         return {"tur": "kaynak", **kayit}

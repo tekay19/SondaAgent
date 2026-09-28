@@ -539,7 +539,7 @@ async function belgeYukle(dosya) {
   const form = new FormData(); form.append("dosya", dosya);
   try {
     const y = await fetch("/api/belge", { method: "POST", body: form });
-    const veri = await y.json();
+    const veri = await y.json().catch(() => ({}));  // 500 gibi JSON olmayan cevapta da doğru mesaj
     delete kayit.yukleniyor;
     if (!y.ok) kayit.hata = veri.detail || "Belge okunamadı";
     else { Object.assign(kayit, veri); if (veri.kesildi) bildir("Belge çok uzun; ilk kısmı kullanılacak"); }
@@ -926,6 +926,7 @@ $("#form").onsubmit = e => {
 async function gonder() {
   const soru = alan.value.trim();
   if (!soru || S.calisiyor) return;
+  if (belgeListesi().some(b => b.yukleniyor)) { bildir("Belge okunuyor, bitince gönder"); return; }  // belge sessizce dışarıda kalmasın
   const model = $("#model").value;
   if (!model) return;
   alan.value = ""; alan.style.height = "auto";

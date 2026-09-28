@@ -286,3 +286,24 @@ def test_belge_kaynagi_cekmecede_metniyle_acilir(arayuz):
     s.wait_for_selector(".ck-kaynak.belge")
     assert "Madde 4: kira artışı yüzde 25" in s.inner_text(".ck-kaynak.belge")
     s.close()
+
+
+def test_belge_yuklenirken_gonderilmez_bitince_belgeyle_gider(arayuz, tmp_path):
+    """İnceleme: "okunuyor…" çipi varken Enter'a basınca belge sessizce dışarıda kalıyor, yeni sohbette kayboluyordu."""
+    s = _sayfa(arayuz)
+    bekleyen = []
+    s.route("**/api/belge", lambda r: bekleyen.append(r) if r.request.method == "POST" else r.continue_())
+    s.set_input_files("#dosya", _belge_dosyasi(tmp_path))
+    s.wait_for_selector(".belge-cip.yukleniyor")
+    istekler = []
+    s.on("request", lambda r: istekler.append(r) if "/api/sor" in r.url else None)
+    _gonder(s, "artış kaç?")
+    s.wait_for_timeout(300)
+    assert istekler == [] and s.input_value("#soru") == "artış kaç?"  # soru kaybolmaz
+    assert "okunuyor" in s.inner_text("#bildirim")
+    bekleyen[0].continue_()
+    s.wait_for_selector(".belge-cip:not(.yukleniyor)")
+    with s.expect_request("**/api/sor") as istek:
+        s.press("#soru", "Enter")
+    assert len(istek.value.post_data_json["belgeler"]) == 1
+    s.close()
