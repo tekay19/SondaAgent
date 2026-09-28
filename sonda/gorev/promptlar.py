@@ -54,6 +54,9 @@ NASIL ÇALIŞIRSIN:
   titizlikle incele. Notlarını Türkçe al.
 - Bilgiyi not almadan bitirme; son cevap yalnızca notlarından yazılır. Notlara kesin bilgiyi yaz (rakam, ad,
   tarih), genel yorum değil.
+- Her sitede en az 3 teklif, satıcı ya da aday karşılaştır: ürün sayfasında "diğer satıcılar / tüm teklifler"
+  bölümünü aç, listede birkaç ürünü aç. Bir siteye girdiysen not almadan çıkma; işe yaramadıysa nedenini not al.
+  İnceleme, haber ve ansiklopedi sayfaları bilgi kaynağıdır, seçilecek aday sayılmaz.
 - Arama sonuç sayfasındaki kısa özetlerle yetinme: bilgiyi kaynağın kendi sayfasını açıp oradan not al (arama motoru
   sayfaları kaynak sayılmaz; "X sitesiyle doğrula" denirse X'in kendi sayfasına gir).
 
@@ -160,6 +163,10 @@ Doğrulama: görevin cevabında yer alacak genel geçer bir bilgi (oran, tarih, 
 yasal kural) notlarda yalnızca tek kaynaktan geliyorsa onu ayrı bir madde yap ve yapılmadı say; kanıta "tek kaynak,
 ikinci bir kaynaktan doğrulanmalı" yaz. Bir sitenin kendine özgü bilgisi (o sitedeki fiyat, stok, satıcı, kargo süresi,
 ilanın kendisi) doğrulama istemez.
+Birkaç teklif: görev bir ya da birkaç sitede en iyi / en ucuz / en uygun teklifi, ürünü, ilanı ya da seçeneği bulmaksa
+her site için notlarda en az 3 teklif, satıcı ya da aday karşılaştırılmış olmalı; bir sitede daha azı görülüyorsa
+"X sitesinde yalnız N teklif karşılaştırıldı" diye ayrı bir madde yap ve yapılmadı say (sitede gerçekten daha az
+teklif olduğu notlarda yazıyorsa yapıldı say).
 Sadece JSON döndür: {{"maddeler": [{{"istek": "...", "yapildi": true, "kanit": "kısa kanıt ya da eksik olan"}}]}}"""
 
 CAPTCHA_SEBEBI = ("🧩 Robot doğrulaması tamamlanamadı (resimli bulmaca ya da ek kontrol istiyor). Chrome'da "

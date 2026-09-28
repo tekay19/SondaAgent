@@ -105,7 +105,7 @@ def dongu(g, gorev_metni, onceki, model, t, durum, derinlik):
     notlar, adimlar, hafiza_ = durum["notlar"], durum["adimlar"], durum["hafiza"]
     maks = min(ayar.MAKS_ADIM, derinlik["maks_adim"])
     geri_bildirim, ekran_iste, son_imza, tekrar = "", False, None, 0
-    bitir_red = {"site": 0, "aday": 0, "sayfa": 0}  # her bitirme kontrolünün kendi hakkı: biri ötekini tüketmesin
+    bitir_red = {"site": 0, "aday": 0, "sayfa": 0, "notsuz": 0}  # her bitirme kontrolünün kendi hakkı: biri ötekini tüketmesin
     yapilan, erken_red, form_red, son_mesaj, islem_red, kontrol_turu = 0, False, False, "", 0, 0
     captcha_denenen, son_okuma, son_imzalar, engelli_siteler = set(), None, [], set()
     durum["gizli"].update(koruma.gizli_adaylar(gorev_metni))
@@ -223,11 +223,9 @@ def dongu(g, gorev_metni, onceki, model, t, durum, derinlik):
                 geri_bildirim = f"Henüz bitirme: {uyari}"
                 adimlar.append(f"{adim_no}. bitirmek istedi, yeterli aday incelenmediği için devam{dusunce_ek}")
                 continue
+            # Her zaman titiz (kullanıcı isteği): her görevde gezilen sayfa yarım bırakılmaz
             eksikler = hafiza_.eksik_notlu()
-            if derinlik.get("inceleme") or derinlik["derinlik"] == "derin":  # titiz: gezilen sayfa yarım bırakılmaz
-                eksikler += [x for x in hafiza_.eksik_ziyaret() if x not in eksikler]
-            elif derinlik["derinlik"] in ("orta", "derin"):  # karşılaştırma: açılmamış "daha fazla"da seçenek kalmasın
-                eksikler += [x for x in hafiza_.eksik_ziyaret(sadece_acilmamis=True) if x not in eksikler]
+            eksikler += [x for x in hafiza_.eksik_ziyaret() if x not in eksikler]
             if eksikler and bitir_red["sayfa"] < ayar.BITIR_RED_SINIRI and adim_no < maks - 3:
                 bitir_red["sayfa"] += 1
                 geri_bildirim = ("Henüz bitirme: gezdiğin bazı sayfaları tam incelemedin: "
@@ -235,6 +233,13 @@ def dongu(g, gorev_metni, onceki, model, t, durum, derinlik):
                                  + ". Bu sayfalara dönüp kaydır ve 'daha fazla' butonlarını aç; daha iyi seçenek "
                                    "olabilir. Notlarını gerekirse düzelt.")
                 adimlar.append(f"{adim_no}. bitirmek istedi, sayfalar tam incelenmediği için devam{dusunce_ek}")
+                continue
+            if (notsuz := hafiza_.notsuz_siteler()) and bitir_red["notsuz"] < ayar.BITIR_RED_SINIRI and adim_no < maks - 3:
+                bitir_red["notsuz"] += 1  # canlı #201: Trendyol'a girip 60 sn kaldı, hiçbir şey not almadan çıktı
+                geri_bildirim = ("Henüz bitirme: şu sitelere girdin ama hiçbir şey not almadın: " + ", ".join(notsuz[:4])
+                                 + ". Oraya dönüp göreve yarayan bilgiyi (teklifler, fiyat, satıcı, özellik) not al; "
+                                   "gerçekten işe yaramıyorsa ya da erişilemiyorsa bunun nedenini not al.")
+                adimlar.append(f"{adim_no}. bitirmek istedi, not alınmadan bırakılan site olduğu için devam{dusunce_ek}")
                 continue
             # "dediğimi yapmalı": görevin her kısmı yapıldı ve genel bilgiler doğrulandı mı? Doğrulamaya giden model
             # dönünce bir kez daha kontrol edilir.

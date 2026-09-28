@@ -72,9 +72,23 @@ def kaynak_siteleri(notlar):
     return sorted({alan_adi(n["url"]) for n in notlar if not _ARAMA_MOTORU.search(n["url"])})
 
 
+# İnceleme, haber, ansiklopedi ve forum sayfaları bilgi kaynağıdır, seçilecek aday değildir (canlı #201: RTINGS ve
+# TechRadar aday sayılınca mağazalarda tek teklife bakıp "5 aday" koşulu doluyordu)
+_BILGI_SITESI = re.compile(
+    r"(^|\.)(rtings|techradar|cnet|theverge|pcmag|tomsguide|tomshardware|gsmarena|notebookcheck|dpreview|wikipedia"
+    r"|youtube|reddit|eksisozluk|donanimhaber|shiftdelete|webtekno|chip|technopat|aa|trthaber|hurriyet|milliyet"
+    r"|sabah|sozcu|ntv|cnnturk|haberturk|bbc|reuters|bloomberg|nytimes|theguardian)\.[a-z.]+$")
+_BILGI_YOLU = re.compile(r"/(reviews?|inceleme|incelemeler|haber|haberler|news|blog|makale|article)(/|-|$)", re.I)
+
+
+def bilgi_sayfasi(url):
+    p = urlparse(url)
+    return bool(_BILGI_SITESI.search(alan_adi(url)) or _BILGI_YOLU.search(p.path))
+
+
 def aday_sayfalari(notlar):
-    """Not alınan aday sayfaları (ürün/ilan/otel): arama motoru, arama ve liste sayfaları hariç."""
-    return {n["url"].split("#")[0] for n in notlar if not arama_sayfasi(n["url"])}
+    """Not alınan aday sayfaları (ürün/ilan/otel): arama ve liste sayfaları ile inceleme/haber sayfaları hariç."""
+    return {n["url"].split("#")[0] for n in notlar if not arama_sayfasi(n["url"]) and not bilgi_sayfasi(n["url"])}
 
 
 def aday_uyarisi(derinlik, notlar):
@@ -230,6 +244,19 @@ class SayfaHafizasi:
             if toplam >= sinir:
                 break
         return "\n\n".join(parcalar) or "(yok)"
+
+    def notsuz_siteler(self):
+        """Girilip hiçbir sayfasından not alınmadan bırakılan siteler (arama motorları hariç), ziyaret sırasıyla."""
+        siteler, notlu = [], set()
+        for url, k in self.sayfalar.items():
+            site = alan_adi(url)
+            if url == "about:blank" or not site or _ARAMA_MOTORU.search(url):
+                continue
+            if k["notlar"]:
+                notlu.add(site)
+            if site not in siteler:
+                siteler.append(site)
+        return [s for s in siteler if s not in notlu]
 
     def eksik_notlu(self):
         return [(url, self.eksik(url)) for url, k in self.sayfalar.items() if k["notlar"] and self.eksik(url)]

@@ -1108,11 +1108,12 @@ def test_orta_gorevde_acilmamis_daha_fazla_ile_bitirilmez(sahte, yerel_tarayici_
     assert "Henüz bitirme" in geri and "Show more" in geri
 
 
-def test_basit_gorevde_acilmamis_daha_fazla_bitirmeyi_engellemez(sahte, yerel_tarayici_ac, site):
+def test_basit_gorevde_de_acilmamis_daha_fazla_bitirmeyi_engeller(sahte, yerel_tarayici_ac, site):
+    """Önceden basit görevde engel değildi; kullanıcı "tüm görevler için titiz çalışmalı" dedi (28 Eylül)."""
     m = sahte([{"eylem": "git", "url": f"{site}/giris.html"}, {"eylem": "not_al", "metin": "a"},
                {"eylem": "git", "url": f"{site}/en/shop.html"}, {"eylem": "bitir"}])
     calistir(yerel_tarayici_ac)
-    assert len(m.istemler) == 4
+    assert len(m.istemler) > 4 and any("tam incelemedin" in i for i in m.istemler[4:])
 
 
 # ---- Gemini: görev sırasında model hatası notları kaybettirmez
@@ -1494,3 +1495,52 @@ def test_sonuc_promptu_dolu_rapor_ister():
     p = gorev.promptlar.SONUC_PROMPTU.lower()
     for ifade in ("her aday", "neden elendi", "doğrulama durumu"):
         assert ifade in p, ifade
+
+
+# ---- her sitede birkaç teklif; aday sayımına inceleme/haber girmez; girilip not alınmadan bırakılan site (canlı #201)
+def _not(url, metin="n"):
+    return {"url": url, "baslik": "", "metin": metin}
+
+
+def test_aday_sayimina_inceleme_ve_haber_sayfalari_girmez():
+    notlar = [_not("https://www.rtings.com/headphones/reviews/sony/wh-1000xm5"),
+              _not("https://www.techradar.com/reviews/sony-wh-1000xm5"),
+              _not("https://www.aa.com.tr/tr/ekonomi/haber/123"),
+              _not("https://www.trendyol.com/sony/wh-p-312097758"),
+              _not("https://www.hepsiburada.com/sony-wh-p-HBCV00002HTTV3")]
+    assert gorev.sayfa.aday_sayfalari(notlar) == {"https://www.trendyol.com/sony/wh-p-312097758",
+                                                  "https://www.hepsiburada.com/sony-wh-p-HBCV00002HTTV3"}
+    assert gorev.sayfa.aday_uyarisi({"min_aday": 3}, notlar)
+
+
+def test_notsuz_birakilan_siteler():
+    h = gorev.sayfa.SayfaHafizasi()
+    for url in ("https://www.trendyol.com/", "https://www.trendyol.com/sr?q=sony", "https://www.google.com/search?q=x",
+                "https://www.hepsiburada.com/sony-p-1", "about:blank"):
+        h.goruldu({"url": url, "baslik": "", "ogeler": [], "metin": ""})
+    h.not_("https://www.hepsiburada.com/sony-p-1", "15.799 TL")
+    assert h.notsuz_siteler() == ["trendyol.com"]
+
+
+def test_girilip_not_alinmayan_site_bitirtmez(sahte, yerel_tarayici_ac, site, monkeypatch):
+    m = sahte([{"eylem": "git", "url": f"{site}/uzun.html"}, {"eylem": "bitir", "sonuc": "a"}, {"eylem": "bitir", "sonuc": "a"}])
+    monkeypatch.setattr(gorev.sayfa.SayfaHafizasi, "eksik_ziyaret", lambda self, **k: [])
+    calistir(yerel_tarayici_ac)
+    assert any("not almadın" in i for i in m.istemler)
+
+
+def test_basit_gorevde_de_gezilen_sayfa_tam_incelenir(sahte, yerel_tarayici_ac, site, monkeypatch):
+    """Kullanıcı: tüm görevler için titiz çalışmalı."""
+    m = sahte([{"eylem": "git", "url": f"{site}/uzun.html"}, {"eylem": "bitir", "sonuc": "a"}, {"eylem": "bitir", "sonuc": "a"}])
+    calistir(yerel_tarayici_ac)  # DERINLIK: basit; not alınmamış, yarım görülmüş sayfa
+    assert any("tam incelemedin" in i for i in m.istemler)
+
+
+def test_kontrol_her_sitede_birkac_teklif_ister():
+    p = gorev.promptlar.KONTROL_PROMPTU.lower()
+    assert "en az 3" in p and "teklif" in p
+
+
+def test_sistem_promptu_her_sitede_birkac_teklif_ve_not_ister():
+    p = gorev.promptlar.SISTEM.lower()
+    assert "en az 3 teklif" in p and "not almadan" in p
