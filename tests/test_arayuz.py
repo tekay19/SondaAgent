@@ -310,3 +310,11 @@ def test_kenar_alt_sade_durum_yok_tema_yalniz_simge(arayuz):
     s.click(".tema-sec [data-tema='dark']")
     assert s.get_attribute("html", "data-theme") == "dark"
     s.close()
+
+
+def test_karsilamada_hazir_soru_kartlari_yok(arayuz):
+    """Kullanıcı istedi: karşılama ekranında hazır öneri soruları görünmesin."""
+    s = _sayfa(arayuz)
+    assert s.locator(".karsilama").count() == 1 and s.locator(".oneri, [data-oneri]").count() == 0
+    assert "Dolar ve altın" not in s.inner_text(".karsilama")
+    s.close()

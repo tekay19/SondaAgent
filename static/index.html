@@ -148,15 +148,6 @@ svg.ik { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none
 .karsilama { min-height: calc(100vh - 260px); display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 40px 0; }
 .karsilama h1 { font-size: clamp(26px, 3.4vw, 34px); font-weight: 600; letter-spacing: -.02em; margin: 0 0 8px; }
 .karsilama p { color: var(--soluk); margin: 0 0 28px; max-width: 46ch; }
-.oneriler { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; width: 100%; max-width: 640px; }
-.oneri {
-  text-align: left; border: 1px solid var(--cizgi); background: var(--yuzey); border-radius: 14px; padding: 13px 15px;
-  display: flex; flex-direction: column; gap: 3px;
-}
-.oneri:hover { border-color: var(--vurgu); }
-.oneri b { font-weight: 600; font-size: 14.5px; }
-.oneri span { color: var(--soluk); font-size: 13.5px; }
-.oneri .etiket { color: var(--vurgu); font-size: 12px; font-weight: 600; }
 
 .m-kullanici { display: flex; justify-content: flex-end; margin: 24px 0 18px; }
 .m-kullanici div {
@@ -390,10 +381,6 @@ svg.ik { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none
 .avatar { border: 0; background: none; }
 .karsilama h1 { font-family: var(--baslik); font-weight: 650; font-size: clamp(32px, 4.6vw, 46px); line-height: 1.08; letter-spacing: -.025em; margin-bottom: 12px; font-variation-settings: "opsz" 96; }
 .cevap h1, .cevap h2, .cevap h3, .cekmece-ust, .takip h4 { font-family: var(--baslik); }
-.oneri .etiket { color: var(--kobalt); }
-.oneri[data-mod-oneri="hizli"] .etiket { color: var(--vurgu); }
-.oneri { transition: border-color .15s, transform .15s; }
-.oneri:hover { transform: translateY(-1px); }
 .m-kullanici div { background: var(--vurgu-zemin); }
 .gonder { background: var(--vurgu); color: var(--vurgu-metin); }
 .mod-sec button[data-mod="derin"][aria-pressed="true"] { color: var(--kobalt); background: color-mix(in srgb, var(--kobalt) 12%, transparent); }
@@ -422,7 +409,7 @@ svg.ik { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none
 /* ---------- canlı kültür: ebru, dokuma, tezgâh, ebru damlası ---------- */
 .karsilama { position: relative; isolation: isolate; }
 /* Ebru: boyalar su üstünde yavaşça akar (feTurbulence baseFrequency canlandırılır) */
-.ebru { position: absolute; z-index: -1; left: 50%; top: -40px; width: min(980px, 118%); height: 420px; transform: translateX(-50%);
+.ebru { position: absolute; z-index: -1; left: 50%; top: 50%; width: min(980px, 118%); height: 420px; transform: translate(-50%, -58%);
   opacity: .34; pointer-events: none;
   -webkit-mask-image: radial-gradient(ellipse 58% 48% at 50% 34%, #000 18%, transparent 70%);
           mask-image: radial-gradient(ellipse 58% 48% at 50% 34%, #000 18%, transparent 70%); }
@@ -441,14 +428,9 @@ svg.ik { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none
 @keyframes kazi { from { opacity: 0; transform: translateY(6px) scale(.8); filter: blur(3px); color: var(--safran); } 60% { color: var(--safran); filter: blur(0); } }
 .marka-orhun { font-family: var(--orhun); font-weight: 400; font-size: 13px; color: var(--soluk); margin-left: 2px; letter-spacing: 1px; opacity: .8; }
 @keyframes dokuma { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
-.karsilama h1, .karsilama p, .karsilama .oneriler { animation: belir .6s cubic-bezier(.2,.7,.2,1) both; }
-.karsilama h1 { animation-delay: .55s; } .karsilama p { animation-delay: .7s; } .karsilama .oneriler { animation-delay: .85s; }
+.karsilama h1, .karsilama p { animation: belir .6s cubic-bezier(.2,.7,.2,1) both; }
+.karsilama h1 { animation-delay: .55s; } .karsilama p { animation-delay: .7s; }
 @keyframes belir { from { opacity: 0; transform: translateY(8px); } }
-/* Kilim ilmeği: öneri kartının alt kenarında şerit ilmek ilmek belirir */
-.oneri { position: relative; overflow: hidden; }
-.oneri::after { content: ""; position: absolute; left: 0; bottom: 0; height: 6px; width: 100%; background: var(--kilim) repeat-x left center / 10px 6px;
-  clip-path: inset(0 100% 0 0); transition: clip-path .5s steps(8, end); }
-.oneri:hover::after, .oneri:focus-visible::after { clip-path: inset(0 0 0 0); }
 /* Tezgâh: Sonda çalışırken küçük bir kilim şeridi dokunmaya devam eder; mekik ileri geri gider */
 .yaziyor span { display: none; }
 .yaziyor::before { content: ""; width: 120px; height: 14px; background: var(--kilim) repeat-x left center / 23.33px 14px; animation: tezgah 2.4s steps(10, end) infinite; }
@@ -475,7 +457,6 @@ svg.ik { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none
   .cekmece-govde { min-width: 0; }
   .sutun { padding: 8px 16px 32px; }
   .alt-alan { padding: 0 12px 10px; }
-  .oneriler { grid-template-columns: 1fr; }
   .m-asistan { grid-template-columns: minmax(0, 1fr); }
   .avatar { display: none; }
   .m-kullanici div { max-width: 88%; }
@@ -740,12 +721,6 @@ $("#gecmis").onclick = e => {
 $("#gecmis-ara").oninput = e => { S.filtre = e.target.value; gecmisCiz(); };
 
 // ---------- sohbet görünümü
-const ONERILER = [
-  { e: "Güncel", b: "Bu hafta teknolojide neler oldu?", a: "Yapay zekâ ve teknoloji dünyasından öne çıkan haberler", mod: "hizli" },
-  { e: "Piyasa", b: "Dolar ve altın bugün kaç?", a: "Güncel kurlar ve son bir ayın değişimi", mod: "hizli" },
-  { e: "Derin araştırma", b: "Güneş paneli yatırımı mantıklı mı?", a: "Türkiye'de maliyet, teşvikler ve geri dönüş süresi", mod: "derin" },
-  { e: "Derin araştırma", b: "En iyi yerel yapay zekâ modelleri", a: "Açık kaynak modellerin güncel karşılaştırması", mod: "derin" },
-];
 const EBRU = `<div class="ebru" aria-hidden="true"><svg viewBox="0 0 800 320" preserveAspectRatio="none">
   <defs><filter id="ebru-suyu" x="-10%" y="-10%" width="120%" height="120%">
     <feTurbulence type="turbulence" baseFrequency="0.0035 0.011" numOctaves="1" seed="4">
@@ -766,12 +741,7 @@ function karsilamaCiz() {
   $("#sutun").innerHTML = `<div class="karsilama">${EBRU}
     <div class="yazit"><div class="kilim-bant sol" aria-hidden="true"></div><span class="orhun" lang="otk" title="bilig: Göktürkçe &quot;bilgi&quot;">${[..."𐰋𐰃𐰠𐰃𐰏"].map((h, i) => `<i style="--s:${i}">${h}</i>`).join("")}</span><div class="kilim-bant sag" aria-hidden="true"></div></div>
     <h1>Bugün neyi araştıralım?</h1>
-    <p>Sonda internette arar, sayfaları okur ve her bilgiyi kaynağıyla birlikte getirir.</p>
-    <div class="oneriler">${ONERILER.map((o, i) => `<button class="oneri" data-oneri="${i}" data-mod-oneri="${o.mod}"><span class="etiket">${o.e}</span><b>${o.b}</b><span>${o.a}</span></button>`).join("")}</div></div>`;
-  document.querySelectorAll("[data-oneri]").forEach(b => b.onclick = () => {
-    ebruDamla(b);
-    const o = ONERILER[b.dataset.oneri]; modSec(o.mod); alan.value = `${o.b} ${o.a}`; gonder();
-  });
+    <p>Sonda internette arar, sayfaları okur ve her bilgiyi kaynağıyla birlikte getirir.</p></div>`;
 }
 function sohbetAc(id) {
   S.aktif = id; U.classList.remove("cekmece-acik");
