@@ -2,7 +2,7 @@
 from .. import model as saglayici
 
 from ..ortak import SECENEKLER, bugun, json_sor
-from .araclar import ARACLAR, arac_calistir
+from .araclar import ARACLAR, arac_calistir, okuma_butcesi
 from .belge_baglami import belge_blogu, belge_ozeti
 from .kaynaklar import Kaynaklar
 from .promptlar import ARAMA_CALISMIYOR, ON_KARAR_PROMPTU, sistem_promptu
@@ -43,7 +43,7 @@ def hizli(soru, gecmis, model, onceki_kaynaklar=(), diger_sohbetler=(), belgeler
         yield from olaylar
         # En iyi sonuçları doğrudan oku: özetler çoğu zaman ayrıntı için yetersiz
         # Belge sayfaları da kaynak listesinde: okunacaklar yalnızca web sonuçları
-        en_iyiler = [k["url"] for k in kaynaklar.liste if not k.get("belge")][:4]
+        en_iyiler = [k["url"] for k in kaynaklar.liste if not k.get("belge")][:5]
         if not en_iyiler and not belgeler:
             # Model, boş aramada uyarılara rağmen eski bilgisiyle cevap uyduruyor ("henüz oynanmadı" gibi).
             # web_ara zaten yeniden denedi; sonuç yoksa model çağrılmadan dürüstçe söylenir.
@@ -53,15 +53,21 @@ def hizli(soru, gecmis, model, onceki_kaynaklar=(), diger_sohbetler=(), belgeler
         if not en_iyiler:  # belge var, web boş: belgeyle cevaplanır ama web kısmı hafızadan uydurulmasın
             mesajlar[-1] = {**mesajlar[-1], "content": f"{mesajlar[-1]['content']}\n\n{WEB_BOS_BELGE_VAR}"}
         else:
-            okuma_sonucu, olaylar = arac_calistir("sayfa_oku", {"urller": en_iyiler}, soru, kaynaklar)
+            okuma_sonucu, olaylar = arac_calistir("sayfa_oku", {"urller": en_iyiler}, soru, kaynaklar,
+                                                  butce=okuma_butcesi(model))
             yield from olaylar
             mesajlar.append({"role": "assistant", "content": "", "tool_calls": [
                 {"function": {"name": "web_ara", "arguments": arg}},
                 {"function": {"name": "sayfa_oku", "arguments": {"urller": en_iyiler}}}]})
             mesajlar.append({"role": "tool", "content": arama_sonucu[:12000], "tool_name": "web_ara"})
-            mesajlar.append({"role": "tool", "content": okuma_sonucu[:16000] or "(okunacak sayfa yok)",
+            mesajlar.append({"role": "tool", "content": okuma_sonucu[:arac_siniri(model)] or "(okunacak sayfa yok)",
                              "tool_name": "sayfa_oku"})
     yield from _dongu(mesajlar, soru, model, dusunme, kaynaklar)
+
+
+def arac_siniri(model):
+    """Modele giden okuma sonucu (karakter): bütçeyle okunan 5 sayfa Gemini'ye sığar."""
+    return 60000 if str(model).startswith("gemini:") else 16000
 
 
 def _dongu(mesajlar, soru, model, dusunme, kaynaklar):
@@ -88,6 +94,6 @@ def _dongu(mesajlar, soru, model, dusunme, kaynaklar):
         mesajlar.append({"role": "assistant", "content": icerik, "tool_calls": [
             {"function": {"name": c.ad, "arguments": c.argumanlar}, "imza": c.imza} for c in cagrilar]})
         for c in cagrilar:
-            sonuc, olaylar = arac_calistir(c.ad, dict(c.argumanlar), soru, kaynaklar)
+            sonuc, olaylar = arac_calistir(c.ad, dict(c.argumanlar), soru, kaynaklar, butce=okuma_butcesi(model))
             yield from olaylar
-            mesajlar.append({"role": "tool", "content": sonuc[:16000], "tool_name": c.ad})
+            mesajlar.append({"role": "tool", "content": sonuc[:arac_siniri(model)], "tool_name": c.ad})

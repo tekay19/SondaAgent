@@ -43,6 +43,11 @@ ARACLAR = [
 ]
 
 
+def okuma_butcesi(model):
+    """Sayfa başına okunacak karakter: Gemini'nin bağlamı büyük, sayfanın tamamına yakınını okur; yerel model 3 parça."""
+    return 8000 if str(model).startswith("gemini:") else None
+
+
 def arama_olayi(sorgular, haber, sonuc_sayisi=None):
     olay = {"tur": "adim", "tip": "ara", "metin": " | ".join(sorgular), "haber": haber}
     if sonuc_sayisi is not None:
@@ -50,8 +55,8 @@ def arama_olayi(sorgular, haber, sonuc_sayisi=None):
     return olay
 
 
-def arac_calistir(ad, arg, soru, kaynaklar):
-    """(model için metin sonuç, arayüz olayları) döner."""
+def arac_calistir(ad, arg, soru, kaynaklar, butce=None):
+    """(model için metin sonuç, arayüz olayları) döner. butce: sayfa başına okunacak karakter (okuma_butcesi)."""
     olaylar = []
     if ad == "web_ara":
         sorgular = arg.get("sorgular") or arg.get("sorgu") or soru
@@ -74,7 +79,7 @@ def arac_calistir(ad, arg, soru, kaynaklar):
         urller = [u for u in arg.get("urller", []) if isinstance(u, str) and u.startswith("http")][:6]
         olaylar.append({"tur": "adim", "tip": "oku", "metin": ", ".join(alan_adi(u) for u in urller)})
         parcalar = []
-        for s in sayfalari_oku(urller, soru, adet=4):
+        for s in sayfalari_oku(urller, soru, adet=4, butce=butce):
             no, olay = kaynaklar.ekle(s["url"], s["baslik"])
             if olay:
                 olaylar.append(olay)

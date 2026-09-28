@@ -75,8 +75,9 @@ ZATEN BİLİNENLER:
 KULLANICI MESAJI: {mesaj}"""
 
 
-PLAN_PROMPTU = """Bugün {tarih}. Kullanıcının araştırma sorusunu internette araştırılacak 4-5 alt soruya böl.
-Her alt soru farklı bir yönü kapsasın (tanım, güncel veriler, maliyet/rakamlar, karşılaştırma, riskler vb.).
+PLAN_PROMPTU = """Bugün {tarih}. Kullanıcının araştırma sorusunu internette araştırılacak 5-7 alt soruya böl.
+Her alt soru farklı bir yönü kapsasın (tanım, güncel veriler, maliyet/rakamlar, karşılaştırma, riskler, resmî
+kaynak/mevzuat, uzman görüşü vb.). Konu uluslararasıysa ya da Türkçe kaynak azsa İngilizce sorguyu güçlü yaz.
 Her biri için bir Türkçe ve bir İngilizce kısa arama sorgusu yaz. Sadece JSON döndür:
 {{"alt_sorular": [{{"soru": "...", "sorgu": "Türkçe sorgu", "sorgu_en": "English query", "haber": false}}]}}"""
 
@@ -92,14 +93,39 @@ BULGU ÖZETLERİ:
 {ozet}"""
 
 
+DOGRULAMA_PROMPTU = """Bugün {tarih}. Kullanıcının araştırma sorusu ve toplanan bulgular aşağıda; her bulgunun başında
+kaynak numarası var. Soruyu cevaplamak için en önemli 6-10 iddiayı çıkar: rakamlar, oranlar, tarihler, fiyatlar,
+yasal kurallar, kesin olgular. Her iddia için onu destekleyen kaynak numaralarını yaz (yalnızca bulgularda gerçekten
+geçenler). Kaynaklar aynı konuda farklı değer veriyorsa "celiski" alanına hangi kaynağın ne dediğini yaz. Yalnızca
+tek kaynakta geçen iddialar için ikinci bir kaynakta doğrulamaya yarayacak kısa bir arama sorgusu yaz.
+Sadece JSON döndür:
+{{"iddialar": [{{"iddia": "...", "kaynaklar": [1, 4], "celiski": "", "sorgu": "doğrulama sorgusu"}}]}}
+
+SORU: {soru}
+
+BULGULAR:
+{bulgular}"""
+
+
 RAPOR_PROMPTU = """Sen Sonda'sın, titiz bir araştırma asistanı. Bugün {tarih}.
-Aşağıdaki web bulgularına dayanarak kullanıcının sorusuna kapsamlı bir Türkçe araştırma raporu yaz.
-- Başlangıçta 2-3 cümlelik bir özet ver, sonra ## başlıklarla bölümlere ayır. Uygunsa karşılaştırma tablosu kullan.
-- Her bilginin sonuna kaynak numarasını köşeli parantezle yaz: [1], [2][3]. Sadece bulgulardaki bilgiyi kullan.
-- Rakamları birden çok kaynak destekliyorsa hepsini göster; kaynaklar çelişiyorsa açıkça belirt.
+Aşağıdaki web bulgularına ve doğrulama tablosuna dayanarak kullanıcının sorusuna kapsamlı, yapılı bir Türkçe
+araştırma raporu yaz:
+- "## Kısaca" ile başla: soruya doğrudan cevap veren 3-5 madde.
+- Sonra ## başlıklı bölümler. Rakam ve karşılaştırmalarda Markdown tablo kullan.
+- Her bilginin sonuna kaynak numarasını köşeli parantezle yaz: [1], [2][3]. Sadece bulgulardaki bilgiyi kullan;
+  kendi yorumunu "değerlendirmem" diye belirt ve numara koyma.
+- "## Doğrulama" bölümü: önemli iddiaların durumu (iki ya da daha çok kaynakta aynı / tek kaynak / kaynaklar
+  çelişiyor ve kim ne diyor). Doğrulama tablosunda "ikinci kaynak arandı" yazan iddialarda yeni bulgulara bakıp son
+  durumu yaz.
+- Ana sonuçların her biri için güven düzeyi (yüksek / orta / düşük) ve kısa nedeni: kaynak sayısı, kaynağın
+  resmîliği, güncelliği, çelişki.
+- "## Sınırlılıklar": bulunamayan, eski ya da zayıf kaynaklı kısımlar.
+- "## Açık kalan sorular" ile bitir.
 - İngilizce kaynaklardaki bilgiyi Türkçeye çevirerek aktar.
-- Eksik kalan noktaları sonda "Açık kalan sorular" başlığıyla yaz.
 {hafiza}
+DOĞRULAMA TABLOSU (bulgulardan çıkarıldı):
+{dogrulama}
+
 BULGULAR:
 {bulgular}"""
 

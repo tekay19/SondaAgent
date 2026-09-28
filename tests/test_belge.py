@@ -291,7 +291,7 @@ def _cok_sayfali(n=5):
 
 
 def _sahte_araclar(okunan, web_sonucu=True):
-    def arac(ad, arg, soru, kaynaklar):
+    def arac(ad, arg, soru, kaynaklar, **k):
         if ad == "web_ara":
             if web_sonucu:
                 for i in range(5):

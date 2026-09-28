@@ -152,26 +152,38 @@ def kelime_puani(soru, metinler):
     return [sum(m.casefold().count(k) for k in kelimeler) for m in metinler]
 
 
-def alakali_parcalar(metin, soru, adet=3):
-    """Uzun sayfadan soruya en yakın parçaları embedding ile seçer; embedding yoksa kelime eşleşmesiyle."""
+def alakali_parcalar(metin, soru, adet=3, butce=None):
+    """Uzun sayfadan soruya en yakın parçaları embedding ile seçer; embedding yoksa kelime eşleşmesiyle.
+    butce (karakter) verilirse sabit adet yerine bütçe dolana kadar parça alınır (Gemini sayfanın tamamına yakınını
+    okuyabilir); sayfa bütçeden kısaysa tamamı döner. Parçalar her zaman sayfadaki sırayla döner."""
+    if butce and len(" ".join(metin.split())) <= butce:
+        return [" ".join(metin.split())]
     parcalar = [p for p in _parcala(metin) if len(p) > 80][:80]
-    if len(parcalar) <= adet:
+    if not butce and len(parcalar) <= adet:
         return parcalar
     try:
         v = embed([soru, *parcalar])
         puan = v[1:] @ v[0]
     except Exception:
         puan = np.array(kelime_puani(soru, parcalar), dtype=float)
-    secilen = sorted(np.argsort(-puan, kind="stable")[:adet])  # sayfadaki sırayı koru
-    return [parcalar[i] for i in secilen]
+    sira = np.argsort(-puan, kind="stable")
+    if not butce:
+        return [parcalar[i] for i in sorted(sira[:adet])]  # sayfadaki sırayı koru
+    secilen, toplam = [], 0
+    for i in sira:
+        if toplam + len(parcalar[i]) > butce:
+            break
+        secilen.append(i)
+        toplam += len(parcalar[i])
+    return [parcalar[i] for i in sorted(secilen)]
 
 
-def sayfalari_oku(urller, soru, adet=3):
+def sayfalari_oku(urller, soru, adet=3, butce=None):
     """Birden çok sayfayı paralel indirir, her birinden alakalı parçaları döner."""
     if not urller:
         return []
     with ThreadPoolExecutor(max_workers=8) as havuz:
         sayfalar = list(havuz.map(sayfa_getir, urller))
     for s in sayfalar:
-        s["parcalar"] = alakali_parcalar(s["metin"], soru, adet) if s["metin"] else []
+        s["parcalar"] = alakali_parcalar(s["metin"], soru, adet, butce) if s["metin"] else []
     return sayfalar
