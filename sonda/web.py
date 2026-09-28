@@ -143,13 +143,26 @@ def _parcala(metin, boyut=900, ortusme=120):
     return [metin[i:i + boyut] for i in range(0, max(len(metin), 1), boyut - ortusme)]
 
 
+_KELIME = re.compile(r"\w{3,}")
+
+
+def kelime_puani(soru, metinler):
+    """Embedding yokken (Ollama kaldırıldı/kapalı) yedek: sorudaki kelimelerin kaba köklerinin geçme sayısı."""
+    kelimeler = {k[:6] for k in _KELIME.findall(soru.casefold())}  # "depozito"/"depozitoyu"
+    return [sum(m.casefold().count(k) for k in kelimeler) for m in metinler]
+
+
 def alakali_parcalar(metin, soru, adet=3):
-    """Uzun sayfadan soruya en yakın parçaları embedding ile seçer."""
+    """Uzun sayfadan soruya en yakın parçaları embedding ile seçer; embedding yoksa kelime eşleşmesiyle."""
     parcalar = [p for p in _parcala(metin) if len(p) > 80][:80]
     if len(parcalar) <= adet:
         return parcalar
-    v = embed([soru, *parcalar])
-    secilen = sorted(np.argsort(-(v[1:] @ v[0]))[:adet])  # sayfadaki sırayı koru
+    try:
+        v = embed([soru, *parcalar])
+        puan = v[1:] @ v[0]
+    except Exception:
+        puan = np.array(kelime_puani(soru, parcalar), dtype=float)
+    secilen = sorted(np.argsort(-puan, kind="stable")[:adet])  # sayfadaki sırayı koru
     return [parcalar[i] for i in secilen]
 
 

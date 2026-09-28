@@ -11,7 +11,7 @@ import numpy as np
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
-from .web import embed
+from .web import embed, kelime_puani
 
 KLASOR = Path(__file__).resolve().parent.parent / "veri" / "belgeler"
 EN_BUYUK_DOSYA = 20 * 1024 * 1024
@@ -145,9 +145,6 @@ def ozet(belge):
 
 PARCA, ORTUSME = 900, 120
 EMBED_EN_FAZLA = 200  # çok uzun belgede embedding'e önce kelime eşleşmesiyle seçilen bu kadar parça gider
-_KELIME = re.compile(r"\w{3,}")
-
-
 def baglam_siniri(model):
     return 60000 if str(model).startswith("gemini:") else 15000
 
@@ -161,11 +158,6 @@ def _parcalar(belgeler):
                     yield {"belge_id": b["id"], "ad": b["ad"], "birim": b["birim"], "no": s["no"], "metin": parca}
 
 
-def _kelime_puani(soru, parcalar):
-    kelimeler = {k[:6] for k in _KELIME.findall(soru.casefold())}  # kaba kök: "depozito"/"depozitoyu"
-    return [sum(p["metin"].casefold().count(k) for k in kelimeler) for p in parcalar]
-
-
 def baglam(belgeler, soru, model):
     """(parçalar, tam): kısa belgeler tamamen; uzunsa soruya en yakın parçalar, sınırı aşmadan, belge/sayfa sırasında."""
     sinir = baglam_siniri(model)
@@ -173,7 +165,7 @@ def baglam(belgeler, soru, model):
         return [{"belge_id": b["id"], "ad": b["ad"], "birim": b["birim"], "no": s["no"], "metin": s["metin"]}
                 for b in belgeler for s in b["sayfalar"]], True
     parcalar = list(_parcalar(belgeler))
-    kelime = _kelime_puani(soru, parcalar)
+    kelime = kelime_puani(soru, [p["metin"] for p in parcalar])
     adaylar = sorted(range(len(parcalar)), key=lambda i: -kelime[i])[:EMBED_EN_FAZLA]
     try:
         v = embed([soru] + [parcalar[i]["metin"] for i in adaylar])

@@ -9,7 +9,7 @@ tamamen, uzun belge `bge-m3` ile soruya en yakın parçalarla gider (Gemini 60 b
 belgeden cevaplanabilen soruda web araması yapmaz; belge kaynakları 📄 "ad · s. N" olarak numaralı kaynak listesine
 girer. Yerel modelde belge bilgisayardan çıkmaz; Gemini seçiliyse arayüz uyarır. Tasarım:
 `docs/superpowers/specs/2026-09-28-belge-ekleme-design.md`.
-Canlı deneme: Gemini Flash ile .docx kira sözleşmesi: "3 maddede özetle" 9 sn, web araması yok, 📄 kaynaklı ve doğru. "Madde 4 yasal sınıra uygun mu?" web aramasını doğru başlattı (10 kaynak) ama sayfa okumada `bge-m3 not found` hatası: Ollama'daki modeller (qwen'ler ve bge-m3) silinmiş görünüyor; web sayfası okuma (`web.alakali_parcalar`) embedding yedeği olmadığı için Gemini'de de düşüyor. Yerel model senaryosu model olmadığından denenemedi.
+Canlı deneme (Gemini Flash, .docx kira sözleşmesi): "3 maddede özetle" 9 sn, web araması yok, 📄 kaynaklı ve doğru. "Madde 4'teki %60 artış yasal sınıra uygun mu?" 11 sn: belge + 10 web kaynağı; TBK 344 ve 12 aylık TÜFE ortalaması tavanıyla "uygun değil" dedi, 📄 ve 🌐 ayrı. İlk denemede Ollama kaldırıldığı için (kullanıcı bilerek sildi; şimdilik yalnız Gemini) web sayfası okuma `bge-m3 not found` ile düşüyordu; artık embedding yoksa kelime eşleşmesi kullanılıyor (`web.kelime_puani`).
 Sıradaki: oturumu açık sitelerden okuma ve analiz (Upwork, e-Devlet, banka ekstresi).
 
 ## 00. Görev modu gerçek testleri (26 Eylül)

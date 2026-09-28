@@ -269,3 +269,16 @@ def test_derin_modda_belge_kaynagi_ve_rapor_istemi(monkeypatch):
     olaylar = list(derin_mod.derin("depozito yasal mı?", [], "qwen", belgeler=[b]))
     assert any(o["tur"] == "kaynak" and o.get("belge") and o["no"] == 1 for o in olaylar)
     assert "Madde 2 depozito" in istemler[0]
+
+
+# ---- Ollama'sız çalışma: web sayfası parçaları da embedding olmadan seçilir (kullanıcı Ollama'yı kaldırdı)
+def test_web_sayfa_parcalari_embedding_yoksa_kelimeyle_secilir(monkeypatch):
+    from sonda import web
+
+    def patla(m):
+        raise ConnectionError('model "bge-m3" not found')
+    monkeypatch.setattr(web, "embed", patla)
+    metin = " ".join(["dolgu metni burada uzun uzun devam ediyor."] * 200) + " Kira artış sınırı TÜFE ortalamasıdır. " \
+        + " ".join(["dolgu metni burada uzun uzun devam ediyor."] * 200)
+    parcalar = web.alakali_parcalar(metin, "kira artış sınırı", adet=3)
+    assert len(parcalar) == 3 and any("TÜFE" in p for p in parcalar)
