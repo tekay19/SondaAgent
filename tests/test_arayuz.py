@@ -175,18 +175,10 @@ def test_ayarlar_paneli_hafiza_yenilemesiyle_ezilmez(arayuz):
     s.close()
 
 
-def test_bulut_model_secilince_gizlilik_rozeti_degisir(arayuz):
+def test_kenar_menude_gizlilik_notu_yok(arayuz):
+    """Kullanıcı istedi: "Bulut model: soruların ... Google'a gider" notu kenar menüden kaldırıldı."""
     s = _sayfa(arayuz)
-    s.click("#ayarlar-ac")
-    s.fill("#gemini-anahtar", "AIzaDOGRUabcd")
-    s.click("[data-gemini-kaydet]")
-    s.wait_for_selector("#model option[value='gemini:gemini-flash-latest']", state="attached")
-    s.select_option("#model", "gemini:gemini-flash-latest")
-    assert "Google" in s.inner_text(".yerel-rozet") and "bu bilgisayarda çalışır" not in s.inner_text(".yerel-rozet")
-    yerel = s.eval_on_selector("#model option:not([value^='gemini:'])", "o => o.value")
-    s.select_option("#model", yerel)
-    assert "Model bu bilgisayarda çalışır" in s.inner_text(".yerel-rozet")
-    s.click("[data-gemini-sil]")
+    assert s.locator(".yerel-rozet").count() == 0 and "Google'a gider" not in s.inner_text(".kenar")
     s.close()
 
 
