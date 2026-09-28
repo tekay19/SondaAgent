@@ -22,6 +22,12 @@ def _sahte_akis(senaryo):
 
 
 def _gorev_senaryosu(soru):
+    if "belgeli" in soru:
+        yield {"tur": "kaynak", "no": 1, "url": "belge:" + "a" * 32 + "#4", "baslik": "kira.pdf · s. 4",
+               "alan": "kira.pdf", "belge": True, "metin": "Madde 4: kira artışı yüzde 25"}
+        yield {"tur": "token", "metin": "Artış %25 [1]."}
+        yield {"tur": "bitti", "sure": 1.0}
+        return
     if "atıf" in soru:
         yield {"tur": "yon", "hedef": "gorev"}
         yield {"tur": "gorev_basladi", "id": "g2"}
@@ -68,6 +74,9 @@ def arayuz():
         if a == "YANLIS":
             raise ModelHatasi("Gemini anahtarı geçersiz ya da yetkisiz. Ayarlar'dan kontrol et.")
     mp.setattr(gemini_saglayici, "anahtar_dogrula", dogrula)
+    # Arayüz testleri kurulu Ollama modeline bağlı olmasın (model silinince/Ollama kapalıyken hepsi düşüyordu)
+    from types import SimpleNamespace
+    mp.setattr(sunucu.ollama, "list", lambda: SimpleNamespace(models=[SimpleNamespace(model="qwen2.5:7b")]))
     mp.setattr(gemini_saglayici, "modeller",
                lambda: [{"ad": "gemini:gemini-flash-latest", "etiket": "Gemini Flash (bulut, ucuz ve akıllı)"}]
                if ayarlar.gemini_anahtari() else [])
@@ -205,4 +214,75 @@ def test_serbest_kutucugu_yalniz_gorevde_gorunur_ve_istekle_gider(arayuz):
     assert SERBESTLER[-1] is True
     s.click("[data-mod=hizli]")
     assert not s.is_visible("#serbest-kutu")
+    s.close()
+
+
+# ---- belge ekleme
+BELGE_ISTEKLERI = []
+
+
+def _belge_dosyasi(tmp_path, ad="kira.txt", metin="Kira artışı yüzde 25"):
+    yol = tmp_path / ad
+    yol.write_text(metin, encoding="utf-8")
+    return str(yol)
+
+
+def test_belge_eklenir_cip_gorunur_ve_istekle_gider(arayuz, tmp_path, monkeypatch):
+    s = _sayfa(arayuz)
+    s.click("[data-mod=hizli]")
+    s.set_input_files("#dosya", _belge_dosyasi(tmp_path))
+    s.wait_for_selector(".belge-cip:not(.yukleniyor)")
+    assert "kira.txt" in s.inner_text(".belge-cip") and "1 bölüm" in s.inner_text(".belge-cip")
+    with s.expect_request("**/api/sor") as istek:
+        _gonder(s, "artış kaç?")
+    govde = istek.value.post_data_json
+    assert len(govde["belgeler"]) == 1 and len(govde["belgeler"][0]) == 32
+    s.wait_for_selector(".m-kullanici .belge-etiket")
+    assert "kira.txt" in s.inner_text(".m-kullanici .belge-etiket")
+    with s.expect_request("**/api/sor") as istek2:  # takip sorusu da aynı belgeyle gider
+        s.wait_for_selector("#gonder:not([aria-label=Durdur])")
+        _gonder(s, "peki depozito?")
+    assert istek2.value.post_data_json["belgeler"] == govde["belgeler"]
+    s.close()
+
+
+def test_belge_cipi_silinince_sunucudan_silinir(arayuz, tmp_path):
+    s = _sayfa(arayuz)
+    s.set_input_files("#dosya", _belge_dosyasi(tmp_path))
+    s.wait_for_selector(".belge-cip:not(.yukleniyor)")
+    with s.expect_request(lambda r: r.method == "DELETE" and "/api/belge/" in r.url):
+        s.click(".belge-cip [data-belge-sil]")
+    assert s.locator(".belge-cip").count() == 0
+    s.close()
+
+
+def test_okunamayan_belge_kirmizi_cip(arayuz, tmp_path):
+    s = _sayfa(arayuz)
+    yol = tmp_path / "resim.png"
+    yol.write_bytes(b"\x89PNG")
+    s.set_input_files("#dosya", str(yol))
+    s.wait_for_selector(".belge-cip.hata")
+    assert "yalnızca PDF" in s.inner_text(".belge-cip.hata")
+    s.close()
+
+
+def test_gemini_seciliyken_belge_uyarisi(arayuz, tmp_path):
+    s = _sayfa(arayuz)
+    s.set_input_files("#dosya", _belge_dosyasi(tmp_path))
+    s.wait_for_selector(".belge-cip:not(.yukleniyor)")
+    s.evaluate("""() => { const m = document.querySelector('#model');
+        m.insertAdjacentHTML('beforeend', '<option value="gemini:x">G</option>'); m.value = 'gemini:x';
+        m.dispatchEvent(new Event('change')); }""")
+    assert "Gemini'ye gönderilir" in s.inner_text("#belge-uyari")
+    s.close()
+
+
+def test_belge_kaynagi_cekmecede_metniyle_acilir(arayuz):
+    s = _sayfa(arayuz)
+    _gonder(s, "belgeli soru")
+    s.wait_for_selector(".kaynak-kart.belge")
+    assert s.get_attribute(".kaynak-kart.belge", "href") is None  # belgenin adresi yok
+    s.click(".atif")
+    s.wait_for_selector(".ck-kaynak.belge")
+    assert "Madde 4: kira artışı yüzde 25" in s.inner_text(".ck-kaynak.belge")
     s.close()

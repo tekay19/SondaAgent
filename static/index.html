@@ -287,6 +287,20 @@ svg.ik { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none
 .serbest[hidden] { display: none; }
 .serbest input { margin: 0; accent-color: var(--vurgu); cursor: pointer; }
 .serbest:has(input:checked) { color: var(--vurgu); font-weight: 500; }
+.atac { width: 32px; height: 32px; border: 0; background: none; color: var(--soluk); border-radius: 8px; display: grid; place-items: center; cursor: pointer; }
+.atac:hover { color: var(--metin); background: var(--yuzey2, rgba(127,127,127,.12)); }
+.atac svg { width: 18px; height: 18px; }
+.belgeler { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 2px; }
+.belgeler:empty { display: none; }
+.belge-cip { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; padding: 4px 6px 4px 10px; border: 1px solid var(--kenar); border-radius: 999px; max-width: 100%; }
+.belge-cip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.belge-cip button { border: 0; background: none; color: var(--soluk); cursor: pointer; font-size: 14px; line-height: 1; padding: 2px 4px; }
+.belge-cip.yukleniyor { opacity: .6; }
+.belge-cip.hata { border-color: var(--hata); color: var(--hata); }
+.belge-uyari { font-size: 12px; color: var(--soluk); padding: 0 4px; }
+.kutu.surukle { outline: 2px dashed var(--vurgu); outline-offset: 2px; }
+.belge-etiket { font-size: 12px; color: var(--soluk); margin-bottom: 4px; }
+.ck-metin { display: block; font-size: 12.5px; color: var(--soluk); margin-top: 4px; white-space: pre-wrap; }
 .gonder { margin-left: auto; width: 36px; height: 36px; border-radius: 50%; border: 0; background: var(--metin); color: var(--zemin); display: grid; place-items: center; }
 .gonder:disabled { opacity: .25; cursor: default; }
 .gonder svg { width: 18px; height: 18px; stroke-width: 2.2; }
@@ -396,6 +410,7 @@ svg.ik { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none
   <symbol id="i-asagi" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
   <symbol id="i-sag" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
   <symbol id="i-yukari" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></symbol>
+<symbol id="i-atac" viewBox="0 0 24 24"><path d="M21 12.5l-8.5 8.5a5 5 0 01-7-7L14 5.5a3.3 3.3 0 014.7 4.7L10.2 18.7a1.7 1.7 0 01-2.4-2.4L15.5 8.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
   <symbol id="i-dur" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor"/></symbol>
   <symbol id="i-simsek" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7Z"/></symbol>
   <symbol id="i-mercek" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.8-4.8M8 10.5h5M10.5 8v5"/></symbol>
@@ -459,8 +474,12 @@ svg.ik { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none
 
     <div class="alt-alan">
       <form class="kutu" id="form">
+        <div class="belgeler" id="belgeler"></div>
+        <div class="belge-uyari" id="belge-uyari" hidden>Belgenin ilgili kısımları Gemini'ye gönderilir.</div>
         <textarea id="soru" rows="1" placeholder="Sonda'ya bir şey sor" aria-label="Mesaj"></textarea>
         <div class="kutu-alt">
+          <button type="button" class="atac" id="ekle" title="Belge ekle (PDF, Word, .txt, .md)" aria-label="Belge ekle"><svg class="ik"><use href="#i-atac"/></svg></button>
+          <input type="file" id="dosya" accept=".pdf,.docx,.txt,.md" multiple hidden>
           <div class="mod-sec" role="group" aria-label="Araştırma modu">
             <button type="button" data-mod="hizli" title="Gerektiğinde arar, hızlı cevap verir"><svg class="ik"><use href="#i-simsek"/></svg>Hızlı</button>
             <button type="button" data-mod="derin" title="Alt sorulara böler, onlarca kaynak okur, rapor yazar"><svg class="ik"><use href="#i-mercek"/></svg>Derin araştırma</button>
@@ -500,6 +519,46 @@ const S = {
 };
 const kaydet = () => depo.yaz("sonda-sohbetler", S.sohbetler.slice(0, 200));
 const aktifSohbet = () => S.sohbetler.find(s => s.id === S.aktif);
+// ---------- belgeler: sohbete eklenen dosyalar (metni sunucuda, sohbette yalnız kimlik ve ad)
+S.bekleyenBelgeler = [];
+const belgeListesi = () => { const s = aktifSohbet(); return s ? (s.belgeler ||= []) : S.bekleyenBelgeler; };  // eski sohbetlerde alan yok
+function belgeleriCiz() {
+  const liste = belgeListesi();
+  $("#belgeler").innerHTML = liste.map((b, i) => `<span class="belge-cip${b.yukleniyor ? " yukleniyor" : ""}${b.hata ? " hata" : ""}"
+    title="${kacis(b.hata || b.ad)}"><span>📄 ${kacis(b.ad)}${b.yukleniyor ? " · okunuyor…" : b.hata ? ` · ${kacis(b.hata)}`
+    : ` · ${b.sayfa_sayisi} ${b.birim}`}</span><button type="button" data-belge-sil="${i}" aria-label="Belgeyi çıkar">✕</button></span>`).join("");
+  const bulut = $("#model").value.startsWith("gemini:");
+  $("#belge-uyari").hidden = !(bulut && liste.some(b => b.id));
+}
+async function belgeYukle(dosya) {
+  const liste = belgeListesi();
+  if (liste.filter(b => !b.hata).length >= 5) { bildir("Bir sohbete en çok 5 belge eklenebilir"); return; }
+  const kayit = { ad: dosya.name, yukleniyor: true };
+  liste.push(kayit); belgeleriCiz();
+  if (dosya.size > 20 * 1024 * 1024) { kayit.yukleniyor = false; kayit.hata = "Dosya çok büyük: en çok 20 MB eklenebilir."; belgeleriCiz(); return; }
+  const form = new FormData(); form.append("dosya", dosya);
+  try {
+    const y = await fetch("/api/belge", { method: "POST", body: form });
+    const veri = await y.json();
+    delete kayit.yukleniyor;
+    if (!y.ok) kayit.hata = veri.detail || "Belge okunamadı";
+    else { Object.assign(kayit, veri); if (veri.kesildi) bildir("Belge çok uzun; ilk kısmı kullanılacak"); }
+  } catch { delete kayit.yukleniyor; kayit.hata = "Sunucuya ulaşılamadı"; }
+  kaydet(); belgeleriCiz();
+}
+function belgeSil(i) {
+  const liste = belgeListesi(); const b = liste[i];
+  if (!b) return;
+  if (b.id) fetch(`/api/belge/${b.id}`, { method: "DELETE" }).catch(() => {});
+  liste.splice(i, 1); kaydet(); belgeleriCiz();
+}
+$("#ekle").onclick = () => $("#dosya").click();
+$("#dosya").onchange = e => { [...e.target.files].forEach(belgeYukle); e.target.value = ""; };
+$("#belgeler").onclick = e => { const b = e.target.closest("[data-belge-sil]"); if (b) belgeSil(Number(b.dataset.belgeSil)); };
+const kutuEl = $("#form");
+["dragenter", "dragover"].forEach(t => document.addEventListener(t, e => { if (e.dataTransfer?.types?.includes("Files")) { e.preventDefault(); kutuEl.classList.add("surukle"); } }));
+["dragleave", "drop"].forEach(t => document.addEventListener(t, e => { if (t === "drop" || !e.relatedTarget) kutuEl.classList.remove("surukle"); }));
+document.addEventListener("drop", e => { if (e.dataTransfer?.files?.length) { e.preventDefault(); [...e.dataTransfer.files].forEach(belgeYukle); } });
 
 // ---------- tema
 function temaUygula(t) {
@@ -543,7 +602,7 @@ function rozetGuncelle() {
     ? "Bulut model: soruların ve okunan sayfalar Google'a gider (şifreler hariç). Sohbetlerin yalnızca bu tarayıcıda saklanır."
     : "Model bu bilgisayarda çalışır. Sohbetlerin yalnızca bu tarayıcıda saklanır.";
 }
-$("#model").onchange = e => { depo.yaz("sonda-model", e.target.value); rozetGuncelle(); };
+$("#model").onchange = e => { depo.yaz("sonda-model", e.target.value); rozetGuncelle(); belgeleriCiz(); };
 
 // ---------- mod
 function modSec(m) {
@@ -597,6 +656,7 @@ $("#gecmis").onclick = e => {
   else if (h.dataset.sil) { S.silinecek = h.dataset.sil; gecmisCiz(); }
   else if ("vazgec" in h.dataset) { S.silinecek = null; gecmisCiz(); }
   else if (h.dataset.silEvet) {
+    (S.sohbetler.find(s => s.id === h.dataset.silEvet)?.belgeler || []).forEach(b => b.id && fetch(`/api/belge/${b.id}`, { method: "DELETE" }).catch(() => {}));
     S.sohbetler = S.sohbetler.filter(s => s.id !== h.dataset.silEvet); kaydet();
     S.silinecek = null; if (S.aktif === h.dataset.silEvet) yeniSohbet(); else gecmisCiz();
   }
@@ -624,21 +684,22 @@ function sohbetAc(id) {
   const s = aktifSohbet();
   if (!s) return yeniSohbet();
   $("#sutun").innerHTML = "";
-  s.mesajlar.forEach((m, i) => $("#sutun").append(m.role === "user" ? kullaniciEl(m.content, i) : asistanEl(m, i)));
+  s.mesajlar.forEach((m, i) => $("#sutun").append(m.role === "user" ? kullaniciEl(m.content, i, m.belgeler || []) : asistanEl(m, i)));
   $("#disa-aktar").hidden = false;
-  gecmisCiz(); $("#akis").scrollTop = $("#akis").scrollHeight;
+  gecmisCiz(); $("#akis").scrollTop = $("#akis").scrollHeight; belgeleriCiz();
 }
 function yeniSohbet() {
   if (S.calisiyor) S.iptal?.abort();
   S.aktif = null; U.classList.remove("cekmece-acik");
   $("#disa-aktar").hidden = true;
-  karsilamaCiz(); gecmisCiz(); alan.focus();
+  S.bekleyenBelgeler = [];
+  karsilamaCiz(); gecmisCiz(); alan.focus(); belgeleriCiz();
 }
 $("#yeni-sohbet").onclick = yeniSohbet; $("#yeni-sohbet-2").onclick = yeniSohbet;
 
-function kullaniciEl(metin, indeks) {
+function kullaniciEl(metin, indeks, belgeler = []) {
   const d = document.createElement("div"); d.className = "m-kullanici"; d.dataset.indeks = indeks;
-  d.innerHTML = `<div>${kacis(metin)}</div><button class="duzenle-btn" data-duzenle-mesaj aria-label="Mesajı düzenle" title="Mesajı düzenle">${ik("kalem")}</button>`;
+  d.innerHTML = `<div>${belgeler.length ? `<div class="belge-etiket">📄 ${belgeler.map(kacis).join(", ")}</div>` : ""}${kacis(metin)}</div><button class="duzenle-btn" data-duzenle-mesaj aria-label="Mesajı düzenle" title="Mesajı düzenle">${ik("kalem")}</button>`;
   return d;
 }
 
@@ -702,10 +763,12 @@ function kaynakSeridi(iz) {
   if (!iz.kaynaklar.length) return "";
   const gorunen = iz.kaynaklar.slice(0, 4);
   const kalan = iz.kaynaklar.slice(4);
-  return `<div class="kaynak-seridi">${gorunen.map(k => `
+  return `<div class="kaynak-seridi">${gorunen.map(k => k.belge ? `
+    <button type="button" class="kaynak-kart belge" data-kaynaklar>
+      <div class="kk-ust"><span>📄 ${kacis(k.alan)}</span></div><div class="kk-ad">${kacis(k.baslik)}</div></button>` : `
     <a class="kaynak-kart" href="${kacis(k.url)}" target="_blank" rel="noopener">
       <div class="kk-ust">${favImg(k.alan)}<span>${kacis(k.alan)}</span></div><div class="kk-ad">${kacis(k.baslik)}</div></a>`).join("")}
-    ${kalan.length ? `<button class="kaynak-kart tumu" data-kaynaklar><span class="favler">${kalan.slice(0, 3).map(k => favImg(k.alan, "")).join("")}</span>+${kalan.length} kaynak</button>` : ""}</div>`;
+    ${kalan.length ? `<button class="kaynak-kart tumu" data-kaynaklar><span class="favler">${kalan.slice(0, 3).map(k => k.belge ? "📄" : favImg(k.alan, "")).join("")}</span>+${kalan.length} kaynak</button>` : ""}</div>`;
 }
 function sureYaz(sn) {
   if (!sn) return "";
@@ -765,7 +828,11 @@ function asistanGuncelle(d, m, canli) {
 function cekmeceAc(iz, vurgu) {
   U.classList.remove("hafiza-modu", "ayar-modu");
   $("#cekmece-baslik").textContent = `Kaynaklar (${iz.kaynaklar.length})`;
-  $("#cekmece-govde").innerHTML = iz.kaynaklar.map(k => `
+  $("#cekmece-govde").innerHTML = iz.kaynaklar.map(k => k.belge ? `
+    <div class="ck-kaynak belge${String(k.no) === String(vurgu) ? " vurgu" : ""}" data-no="${k.no}">
+      <span class="ck-no">${k.no}</span>
+      <span><span class="ck-alan">📄 ${kacis(k.alan)}</span><span class="ck-ad">${kacis(k.baslik)}</span>
+      <span class="ck-metin">${kacis(k.metin || "")}</span></span></div>` : `
     <a class="ck-kaynak${String(k.no) === String(vurgu) ? " vurgu" : ""}" data-no="${k.no}" href="${kacis(k.url)}" target="_blank" rel="noopener">
       <span class="ck-no">${k.no}</span>
       <span><span class="ck-alan">${favImg(k.alan)}${kacis(k.alan)}</span><span class="ck-ad">${kacis(k.baslik)}</span></span></a>`).join("");
@@ -813,7 +880,7 @@ $("#sutun").addEventListener("click", e => {
   if (atif) {
     const k = iz.kaynaklar.find(x => String(x.no) === atif.dataset.no);
     if (!k) return;
-    if (e.ctrlKey || e.metaKey) return window.open(k.url, "_blank", "noopener");
+    if ((e.ctrlKey || e.metaKey) && !k.belge) return window.open(k.url, "_blank", "noopener");
     return cekmeceAc(iz, atif.dataset.no);
   }
   if (e.target.closest("[data-kaynaklar]")) return cekmeceAc(iz);
@@ -865,7 +932,9 @@ async function gonder() {
 
   let s = aktifSohbet();
   if (!s) {
-    s = { id: crypto.randomUUID?.() || String(Date.now()), baslik: soru.slice(0, 60), zaman: Date.now(), mesajlar: [] };
+    s = { id: crypto.randomUUID?.() || String(Date.now()), baslik: soru.slice(0, 60), zaman: Date.now(), mesajlar: [],
+          belgeler: S.bekleyenBelgeler.filter(b => b.id) };
+    S.bekleyenBelgeler = [];
     S.sohbetler.unshift(s); S.aktif = s.id; $("#sutun").innerHTML = "";
   } else {
     s.zaman = Date.now(); S.sohbetler = [s, ...S.sohbetler.filter(x => x !== s)];
@@ -874,12 +943,13 @@ async function gonder() {
   const sonCevap = [...s.mesajlar].reverse().find(m => m.role === "assistant");
   const onceki_kaynaklar = (sonCevap?.iz?.kaynaklar || []).map(({ no, url, baslik }) => ({ no, url, baslik }));
   const diger_sohbetler = S.sohbetler.filter(x => x !== s).slice(0, 15).map(x => x.baslik);
-  s.mesajlar.push({ role: "user", content: soru });
+  const belgeler = (s.belgeler || []).filter(b => b.id);
+  s.mesajlar.push({ role: "user", content: soru, belgeler: belgeler.map(b => b.ad) });
   const m = { role: "assistant", content: "", mod: S.mod, iz: { adimlar: [], kaynaklar: [], sure: null } };
   s.mesajlar.push(m); kaydet(); gecmisCiz();
 
   $("#disa-aktar").hidden = false;
-  const kEl = kullaniciEl(soru, s.mesajlar.length - 2);
+  const kEl = kullaniciEl(soru, s.mesajlar.length - 2, belgeler.map(b => b.ad));
   const aEl = asistanEl(m, s.mesajlar.length - 1);
   $("#sutun").append(kEl, aEl);
   asistanGuncelle(aEl, m, true);
@@ -897,7 +967,7 @@ async function gonder() {
   try {
     const yanit = await fetch("/api/sor", {
       method: "POST", headers: { "Content-Type": "application/json" }, signal: S.iptal.signal,
-      body: JSON.stringify({ soru, gecmis, model, mod: S.mod, onceki_kaynaklar, diger_sohbetler,
+      body: JSON.stringify({ soru, gecmis, model, mod: S.mod, onceki_kaynaklar, diger_sohbetler, belgeler: belgeler.map(b => b.id),
                              serbest: S.mod === "gorev" && $("#serbest").checked }),
     });
     if (!yanit.ok) throw new Error(`Sunucu ${yanit.status} döndürdü`);
@@ -912,6 +982,7 @@ async function gonder() {
         const o = JSON.parse(p.slice(6));
         if (o.tur === "token") m.content += o.metin;
         else if (o.tur === "sifirla") m.content = "";
+        else if (o.tur === "belge_yok") { const b = (s.belgeler || []).find(x => x.id === o.id); if (b) { b.hata = "belge bulunamadı"; delete b.id; belgeleriCiz(); } }
         else if (o.tur === "adim") m.iz.adimlar.push(o);
         else if (o.tur === "kaynak") { m.iz.kaynaklar.push(o); m.iz.kaynaklar.sort((a, b) => a.no - b.no); }
         else if (o.tur === "bitti") m.iz.sure = o.sure;
@@ -955,7 +1026,7 @@ $("#disa-aktar").onclick = () => {
   for (const m of s.mesajlar) {
     if (m.role === "user") { md += `## Soru\n\n${m.content}\n\n`; continue; }
     md += `## Cevap\n\n${m.content}\n\n`;
-    if (m.iz?.kaynaklar?.length) md += "### Kaynaklar\n\n" + m.iz.kaynaklar.map(k => `${k.no}. [${k.baslik}](${k.url})`).join("\n") + "\n\n";
+    if (m.iz?.kaynaklar?.length) md += "### Kaynaklar\n\n" + m.iz.kaynaklar.map(k => k.belge ? `${k.no}. 📄 ${k.baslik}` : `${k.no}. [${k.baslik}](${k.url})`).join("\n") + "\n\n";
   }
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([md], { type: "text/markdown;charset=utf-8" }));
