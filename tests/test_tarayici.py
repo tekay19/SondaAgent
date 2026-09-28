@@ -387,3 +387,16 @@ def test_gizli_radyo_dugmesi_for_etiketiyle_listelenir(tarayici, site):
     tarayici.tikla(az["no"])
     assert tarayici.sayfa.is_checked("#r2")
     assert len([o for o in s["ogeler"] if "More than 30" in o["metin"]]) == 1  # etiket bir kez listelenir
+
+
+def test_basili_tut_dogrulamasi_captcha_sayilir(tarayici, site):
+    tarayici.git(f"{site}/basili_tut.html")
+    assert tarayici.bak()["captcha"] is True
+    assert tarayici.captcha_onayla() is False  # onay kutusu yok: kullanıcıya bırakılır
+
+
+def test_basili_tut_gecen_uzun_kilavuz_captcha_sayilmaz():
+    from sonda.tarayici.sayfa import basili_tut_mu
+    assert basili_tut_mu("İnsan olduğunuzu doğrulamak için Basılı Tutun")
+    assert not basili_tut_mu("Telefonu kapatmak için güç tuşunu basılı tutun. " * 60)
+    assert not basili_tut_mu("Press and hold the button to pair your headphones.")

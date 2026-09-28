@@ -1,11 +1,12 @@
 """Tek bir sekmenin kontrolü: bak, tıkla, yaz, kaydır... Güvenlik kararları koruma.py'dedir; burası uygular."""
+import re
 import time
 from contextlib import contextmanager
 from urllib.parse import urlparse
 
 import trafilatura
 
-from ..koruma import _kayitli_alan
+from ..koruma import _kayitli_alan, sade
 from .js import BAK, CAPTCHA_BASLIKLARI, CAPTCHA_KUTULARI, ENGEL
 
 # Bilinen robot doğrulaması sunucuları -> çerçeve adresinin yol öneki. Adresin herhangi bir yerinde geçen kelimeye
@@ -13,6 +14,19 @@ from .js import BAK, CAPTCHA_BASLIKLARI, CAPTCHA_KUTULARI, ENGEL
 CAPTCHA_SUNUCULARI = {"challenges.cloudflare.com": "/", "hcaptcha.com": "/", "newassets.hcaptcha.com": "/",
                       "assets.hcaptcha.com": "/", "www.google.com": "/recaptcha/", "google.com": "/recaptcha/",
                       "www.recaptcha.net": "/recaptcha/", "recaptcha.net": "/recaptcha/"}
+
+
+# "Basılı tut" doğrulaması (PerimeterX türü; canlı test: Kariyer.net "İnsan olduğunuzu doğrulamak için Basılı Tutun").
+# Onay kutusu yoktur, Sonda çözmez: tanınır ve robot doğrulaması gibi kullanıcıya bırakılır / atlanır. Bir kılavuzda
+# geçen "press and hold" captcha sayılmasın diye kısa sayfa ve doğrulama sözü de aranır.
+_BASILI_TUT = re.compile(r"basili tut|press (&|and) hold|hold to confirm")
+_DOGRULAMA_SOZU = re.compile(r"dogrula|insan|robot|human|verify|bot degil|not a bot")
+BASILI_TUT_METNI = 1500
+
+
+def basili_tut_mu(metin):
+    metin = sade(metin)
+    return len(metin) < BASILI_TUT_METNI and bool(_BASILI_TUT.search(metin)) and bool(_DOGRULAMA_SOZU.search(metin))
 
 
 def captcha_adresi_mi(url):
@@ -160,7 +174,7 @@ class Tarayici:
         tutamac = self.sayfa.wait_for_function("() => (" + BAK + ")()", polling=100, timeout=ZAMAN_ASIMI)
         sayfa = tutamac.json_value()
         sayfa["captcha"] = bool(self._captcha_cerceveleri()) or \
-            any(b in sayfa["baslik"].lower() for b in CAPTCHA_BASLIKLARI)
+            any(b in sayfa["baslik"].lower() for b in CAPTCHA_BASLIKLARI) or basili_tut_mu(sayfa.get("metin", ""))
         return sayfa
 
     def _captcha_cerceveleri(self):

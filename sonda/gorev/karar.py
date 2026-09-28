@@ -5,7 +5,7 @@ import re
 from .. import hafiza, koruma
 from .. import model as saglayici
 from ..ortak import JSON_SECENEKLERI, bugun
-from . import ayar
+from . import ayar, site_hafizasi
 from .promptlar import (BUTON_KURALI, BUTON_KURALI_SERBEST, DEGERLENDIRME_PROMPTU, DERINLIK_PROMPTU, KONTROL_PROMPTU,
                         SISTEM)
 
@@ -58,7 +58,8 @@ def derinlik_belirle(model, gorev_metni, onceki):
     try:
         yanit = saglayici.sohbet(model, [
             {"role": "system", "content": DERINLIK_PROMPTU.format(tarih=bugun())},
-            {"role": "user", "content": (f"Önceki konuşma:\n{onceki}\n\n" if onceki else "") + f"Görev: {gorev_metni}"}],
+            {"role": "user", "content": (f"Önceki konuşma:\n{onceki}\n\n" if onceki else "") + f"Görev: {gorev_metni}"
+             + (f"\n\n{h}" if (h := site_hafizasi.istem_metni(gorev_metni=gorev_metni)) else "")}],
             json=True, secenekler=JSON_SECENEKLERI)
         veri = json.loads(yanit.metin)
     except Exception:

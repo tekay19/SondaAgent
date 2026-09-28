@@ -1,7 +1,8 @@
 """Görevleri çalışan Sonda sunucusuna (python server.py) arayüzdeki gibi verir, olayları ve sonucu kaydeder.
 Kullanım: python tests/gorev_toplu.py <etiket> [id,id,...] [--liste zor|uzun] [--model ...] [--kilitli]
 Varsayılan: Gemini Flash ve "Butonlara kendisi bassın" açık (--kilitli kapatır). Devretmede DEVIR_BEKLE saniye
-bekler (robot doğrulaması kendiliğinden geçebilir), sonra durdurur. Sonuç: tests/sonuc_gorev_<etiket>.json"""
+bekler (robot doğrulaması kendiliğinden geçebilir); sonra robot doğrulamasında "devam" der (Sonda siteyi atlamalı),
+diğer devirlerde durdurur. Sonuç: tests/sonuc_gorev_<etiket>.json"""
 import argparse
 import json
 import sys
@@ -23,7 +24,7 @@ LISTELER = {"zor": GOREVLER_ZOR, "uzun": GOREVLER_UZUN}
 
 def calistir(g, model, serbest):
     basla, sonuc = time.time(), {**g, "adimlar": [], "anlatim": [], "devir": [], "kaynaklar": [], "cevap": ""}
-    devir_zamani, gorev_id = None, None
+    devir_zamani, gorev_id, devir_komutu = None, None, "durdur"
 
     def yaz(satir):
         print(f"  [{g['id']} {time.time() - basla:5.0f}s] {satir[:160]}", flush=True)
@@ -45,6 +46,8 @@ def calistir(g, model, serbest):
             elif tur == "kullaniciya":
                 sonuc["devir"].append(o.get("sebep"))
                 devir_zamani = time.time()
+                # Robot doğrulaması kimse çözmeden "devam": Sonda siteyi atlayıp sürdürmeli. Diğerleri durdurulur.
+                devir_komutu = "devam" if "robot doğrulaması" in str(o.get("sebep")).lower() else "durdur"
                 yaz(f"DEVİR: {o.get('sebep')}")
             elif tur == "devam_edildi":
                 devir_zamani = None
@@ -59,7 +62,10 @@ def calistir(g, model, serbest):
                 yaz(f"HATA: {o.get('metin')}")
             simdi = time.time()
             gecikti = devir_zamani and simdi - devir_zamani > DEVIR_BEKLE
-            if gorev_id and (gecikti or simdi - basla > GOREV_SINIRI):
+            if gorev_id and gecikti:
+                httpx.post(f"{SUNUCU}/api/gorev/{gorev_id}/{devir_komutu}")
+                devir_zamani = None
+            elif gorev_id and simdi - basla > GOREV_SINIRI:
                 httpx.post(f"{SUNUCU}/api/gorev/{gorev_id}/durdur")
                 devir_zamani = None
     sonuc["sure"] = round(time.time() - basla, 1)

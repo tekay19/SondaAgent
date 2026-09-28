@@ -493,3 +493,21 @@ def test_serbest_modda_kart_formu_gonderilemez_ve_hassas_alana_yazilamaz():
 
 def test_serbest_olmadan_davranis_degismez():
     assert not koruma.kontrol({"eylem": "tikla", "no": 1}, buton("Gönder")).izin
+
+
+# ---- bilgi yazıları buton sayılmaz (canlı test: GetYourGuide tur kartı "Dün 24 kez rezervasyon yapıldı…")
+@pytest.mark.parametrize("metin", [
+    "Dün 24 kez rezervasyon yapıldı Kapadokya: Göreme Gün Doğumu Balon Turu", "Son 24 saatte 500 kişi satın aldı",
+    "Sipariş verildi", "Satın alan 300 kişi", "Ödeme tamamlandı", "Rezervasyon yapılır mı?", "Başvuru gönderildi",
+])
+def test_gecmis_zamanli_bilgi_yazilari_buton_sayilmaz(metin):
+    assert not koruma.para_butonu(buton(metin)), metin
+    assert koruma.kontrol({"eylem": "tikla", "no": 1}, buton(metin), serbest=True).izin, metin
+
+
+@pytest.mark.parametrize("metin", [
+    "Rezervasyon yap", "Rezervasyonu tamamlayın", "Satın alın", "Siparişinizi verin", "Ödemeyi tamamlayın",
+    "Rezervasyon yapmak için tıkla",
+])
+def test_emir_kipindeki_para_butonlari_yine_engellenir(metin):
+    assert not koruma.kontrol({"eylem": "tikla", "no": 1}, buton(metin), serbest=True).izin, metin

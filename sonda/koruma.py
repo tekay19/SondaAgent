@@ -122,12 +122,27 @@ def buton_adi(oge):
     return sade(ad)
 
 
+# Eşleşen fiil geçmiş zaman ya da sıfat-fiilse metin bir bilgi yazısıdır, buton değil (canlı test: GetYourGuide tur
+# kartı "Dün 24 kez rezervasyon yapıldı…", ürün kartları "500 kişi satın aldı", "sipariş verildi", "satın alan").
+# Emir kipi ("yapın", "verin", "tamamlayın") ve ek almamış fiil yine yakalanır.
+_BILGI_EKI = re.compile(r"il\w*|in[dm]\w*|\w*[dt][iu]k?|\w*m[iu]s\w*|[ae]n|y?[ae]n\w*")
+
+
+def _buton_eslesir(desen, metin):
+    for m in desen.finditer(metin):
+        devam = re.match(r"\w*", metin[m.end():]).group()
+        if devam and m.group()[-1:].isalpha() and _BILGI_EKI.fullmatch(devam):
+            continue
+        return True
+    return False
+
+
 def yasak_buton(oge):
-    return bool(_YASAK_BUTON.search(buton_adi(oge)))
+    return _buton_eslesir(_YASAK_BUTON, buton_adi(oge))
 
 
 def para_butonu(oge):
-    return bool(_PARA_BUTON.search(buton_adi(oge)))
+    return _buton_eslesir(_PARA_BUTON, buton_adi(oge))
 
 
 def _kayitli_alan(host):

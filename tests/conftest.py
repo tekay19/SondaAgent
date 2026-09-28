@@ -77,6 +77,26 @@ def _gecici_gorev_kayitlari(tmp_path_factory):
 
 
 @pytest.fixture(autouse=True, scope="session")
+def _site_hafizasi_oturum(tmp_path_factory):
+    """Site hafızası tüm oturumda geçici dosyaya yazılır: test bittikten sonra işini bitiren görev işçisi de gerçek
+    veri/site_hafizasi.json'a yazamaz. Ders çıkarma (arka planda model çağrısı) başka testin sahte modelini
+    tüketmesin diye kapalı; test_site_hafizasi açar."""
+    from sonda.gorev import site_hafizasi
+    eski = site_hafizasi.DOSYA, site_hafizasi.DERS_CIKAR
+    site_hafizasi.DOSYA = tmp_path_factory.mktemp("site_hafizasi") / "site_hafizasi.json"
+    site_hafizasi.DERS_CIKAR = False
+    yield
+    site_hafizasi.DOSYA, site_hafizasi.DERS_CIKAR = eski
+
+
+@pytest.fixture(autouse=True)
+def _gecici_site_hafizasi(tmp_path, monkeypatch, _site_hafizasi_oturum):
+    """Her test boş bir site hafızasıyla başlar."""
+    from sonda.gorev import site_hafizasi
+    monkeypatch.setattr(site_hafizasi, "DOSYA", tmp_path / "site_hafizasi.json")
+
+
+@pytest.fixture(autouse=True, scope="session")
 def _test_captcha_ana_makinesi():
     """Testlerde yerel sahte captcha çerçeveleri localhost'tan gelir (gerçekte yalnızca bilinen captcha sunucuları)."""
     from sonda.tarayici import sayfa

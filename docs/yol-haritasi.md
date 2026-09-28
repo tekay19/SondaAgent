@@ -1,6 +1,54 @@
 # Sonda — Yol Haritası ve Açık Kararlar
 
-*Son güncelleme: 25 Eylül 2026*
+*Son güncelleme: 28 Eylül 2026*
+
+## 00. Görev modu gerçek testleri (26 Eylül)
+
+"Butonlara kendisi bassın" kutucuğu gerçek sitelerde, Gemini Flash ile test edildi. Toplu çalıştırıcı:
+`python tests/gorev_toplu.py <etiket> [--liste zor|uzun]` (sunucu açıkken; sonuç `tests/sonuc_gorev_<etiket>.json`).
+
+**Trendyol powerbank testi:** Ürünü favorilere ve sepete ekledi (Chrome'da doğrulandı) ama birkaç seçeneği
+karşılaştırmadan ilk ürünü seçti. Bu, aşağıdaki "aday kapısı"nı doğurdu.
+
+**Bulunan ve düzeltilen hatalar:**
+
+| Sorun (canlı testte) | Düzeltme |
+|---|---|
+| Kutucuk açıkken "Ödemeyi Gönder", "Para Çek", "Hesap Sil", "Start free trial" gibi butonlar geçiyordu; SPA ödeme sayfasında form dışı "Onayla" basılabiliyordu | Para kuralı genişledi; ödeme sayfası adresten ya da kart/IBAN/kod alanından tanınır, orada kutucuk geçmez |
+| "Birkaç seçeneği karşılaştır" denmişken tek ürüne bakıp sepete ekledi | Seçim görevinde en az N adayın kendi sayfası incelenmeden sepete ekleme/favori/başvuru ve bitirme yok (arama/liste sayfaları sayılmaz) |
+| Trendyol "−" butonunun ipucu "…satın alabilirsin" diye para butonu sanıldı | Buton adı ipucundan (title) alınmaz, yalnızca ikon butonlarda |
+| Sepette "+" sonrası sayfa güncellenmeden okundu, model yeniden bastı (adet 3 olabilirdi) | Tıklamanın başlattığı istekler ve sayfa geçişi beklenir |
+| Kullanıcının Chrome'unda arka plandaki sekmede ekran görüntüsü 30 sn bekliyordu | 5 sn sınır |
+| `oku` ile taranan uzun doküman "%1 gördün" sayıldı, aynı not 3 kez alındı | `oku` sayfayı görülmüş sayar |
+| "5 maddeyi birer cümleyle" istenmişken cevaba güçlü/zayıf yönler eklendi | Sonuç kullanıcının istediği biçime uyar |
+| Çok adımlı görevde bir kısım yapılmadan bitirilebiliyordu | Bitirmeden önce görev maddelere ayrılıp kontrol edilir; eksik varsa devam |
+
+**10 görev (kolaydan zora, farklı alanlar):** 1. tur 8 başarılı, 1 başarısız (sepet), 1 yapılamaz (Booking
+Türkiye'deki otelleri Türkiye'den göstermiyor; Sonda bunu dürüstçe söyledi). 2. tur (düzeltmelerle, #110 Google
+Oteller'e taşındı): 10/10. Hepsiburada 38→22 adım, Python dokümanı 10→6 adım.
+
+**5 uzun, çok siteli görev (28 Eylül, `tests/sonuc_gorev_uzun_tur1.json`):** 3 tamamlandı, 2 yarıda kaldı.
+Robot doğrulamasında betik artık "devam" diyor (Sonda siteyi atlamalı).
+
+| # | Görev | Sonuç |
+|---|---|---|
+| 201 | Kulaklık: 4 mağaza + 2 inceleme + Trendyol favori | ✅ 5,4 dk, 32 adım. 4 mağazada satıcı/puan/fiyat/garanti/kargo, artı-eksi, gerekçeli öneri, favoriye eklendi. Bir robot doğrulamasında "devam" sonrası sürdürdü. Kusurlar: RTINGS okundu ama kaynak listesinde yok (artı-eksiler yalnız TechRadar'a [5] atfedildi); Teknosa'nın kendi fiyatı 30.699 TL (diğerlerinin ~2 katı) doğrulanmadı |
+| 202 | Kapadokya gezisi + bütçe | ❌ 2,4 dk. Uçuş ve 2 otel doğru bulundu; GetYourGuide'daki tur kartı "Dün 24 kez rezervasyon yapıldı…" **para butonu sanılıp engellendi** (`koruma.py` `_PARA_BUTON`: `rezervasyon\w* (yap…)` "yapıldı"yı da yakalıyor; kutucuk açıkken bile geçmiyor). Balon ikinci site, hava durumu, bütçe eksik |
+| 203 | Asgari ücret + TÜİK enflasyon | ✅ 2,4 dk, 23 adım, devir yok. ÇSGB + AA + TRT; net artış %27,01 ve reel kayıp %3,42 doğru hesaplandı; TÜİK Ağustos 2026 TÜFE %31,51 |
+| 204 | Kariyer.net + Indeed Python ilanları | ❌ 1,1 dk. Kariyer.net "Basılı Tut" doğrulaması **tanınmadı** (`captcha` eylemi "bulunamadı"); model serbest metinle devretti, betik bunu robot doğrulaması saymayıp durdurdu. Indeed'e hiç geçilmedi |
+| 205 | FastAPI / DRF / Litestar | ✅ 3,4 dk, 27 adım. 3 depo (yıldız, sürüm+tarih, issue), 3 doküman, pypistats, tablo, gerekçeli öneri |
+
+**Düzeltmeler (28 Eylül):**
+- [x] Para/son adım kuralları geçmiş zaman ve bilgi yazılarını yakalamıyor ("rezervasyon yapıldı", "satın aldı", "sipariş verildi", "satın alan"); emir kipi ("yapın", "verin") yine engelli (`koruma._BILGI_EKI`).
+- [x] "Basılı tut" doğrulaması robot doğrulaması sayılıyor (kısa sayfa + doğrulama sözü şartıyla); kullanıcıya bırakılır, "devam"da site atlanır.
+- [x] **Site hafızası** (`sonda/gorev/site_hafizasi.py`, `veri/site_hafizasi.json`): her görevden sonra her site için nerede ne yapıldığı (sayfalar, tıklamalar, engeller, robot doğrulamaları) kaydedilir; model site başına kısa dersler çıkarır. Model bir siteye girince ya da görevde site adı geçince bu hafızayı istemde görür. Not içerikleri ve şifreler yazılmaz.
+- [ ] Okunan ama not alınmayan sayfa (RTINGS) kaynak listesine girsin ya da cevaptaki bilgi ona atfedilmesin.
+- Yeniden çalıştırma (202, 204) Chrome "İzin ver" beklediği için yapılamadı; bırakıldı. Görev modunda site site hata kovalama burada durduruldu, sıradaki iş "dosyalar ve web" (tasarım: `docs/superpowers/specs/2026-09-28-belge-ekleme-design.md`).
+
+**Açık konular:**
+- Chrome her yeni bağlantıda (sunucu her başladığında) "İzin ver" istiyor; kimse basmazsa 90 sn sonra görev biter.
+- Upwork'te "Submit proposal" kutucuk açıkken izinli; ama her teklif Connects harcar (parayla alınır). Para sayılsın mı?
+- Google Haritalar'daki anlamsız "Daha fazla göster" butonları bitirmeyi bir kez geciktirebiliyor.
 
 ## 0. Gemini sağlayıcı (25 Eylül akşamı)
 

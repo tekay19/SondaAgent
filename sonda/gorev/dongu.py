@@ -10,6 +10,7 @@ from ..ortak import SECENEKLER, bugun
 from ..web import alan_adi
 from . import ayar
 from . import karar as kararlar
+from . import site_hafizasi
 from .eylemler import adim, uygula
 from .istem import istem
 from .kayit import GorevKaydi
@@ -80,6 +81,13 @@ def dogrulama_sonrasi(url, sayfa, engelli_siteler):
         return "Robot doğrulaması tamamlandı; kaldığın yerden devam et."
     engelli_siteler.add(alan_adi(url))
     return ("Robot doğrulaması hâlâ geçilmedi; kullanıcı çözmeden devam dedi. " + engel_metni(url))
+
+
+def dogrulama_ozeti(url, engelli_siteler):
+    """Site hafızası için: robot doğrulaması bu sitede nasıl sonuçlandı."""
+    if alan_adi(url) in engelli_siteler:
+        return "robot doğrulaması çıktı, çözülemedi; site atlandı"
+    return "robot doğrulaması çıktı, kullanıcı çözdü"
 
 
 def model_gorev_metni(gorev_metni, harita, onceki_gizli=()):
@@ -153,8 +161,11 @@ def dongu(g, gorev_metni, onceki, model, t, durum, derinlik):
             onaylandi = t.captcha_onayla()
             yield adim("tikla", "Robot doğrulamasının onay kutusu işaretlendi" if onaylandi else "Robot doğrulaması bekleniyor")
             t.sayfa.wait_for_timeout(int(ayar.CAPTCHA_BEKLE * 1000))
+            dogrulama_url = t.url
             sayfa, ekran = bak(t, ekran_iste)
             geri_bildirim = "Robot doğrulaması geçildi; kaldığın yerden devam et."
+            if not sayfa.get("captcha"):
+                hafiza_.eylem(dogrulama_url, "robot doğrulaması çıktı, onay kutusuyla geçildi")
             if sayfa.get("captcha"):
                 adimlar.append(f"{adim_no}. robot doğrulaması kullanıcıya bırakıldı")
                 komut = yield from devret(g, CAPTCHA_SEBEBI, otomatik=lambda: not t.bak().get("captcha"), gizliler=durum["gizli"])
@@ -165,6 +176,7 @@ def dongu(g, gorev_metni, onceki, model, t, durum, derinlik):
                     return
                 sayfa, ekran = bak(t, ekran_iste)
                 geri_bildirim = dogrulama_sonrasi(t.url, sayfa, engelli_siteler)
+                hafiza_.eylem(dogrulama_url, dogrulama_ozeti(dogrulama_url, engelli_siteler))
         hafiza_.goruldu(sayfa)
         ekran_iste = False
         istem_metni = koruma.gizle(istem(model_metni, onceki, derinlik, notlar, hafiza_, adimlar, sayfa, geri_bildirim,
@@ -303,6 +315,7 @@ def dongu(g, gorev_metni, onceki, model, t, durum, derinlik):
         if sebep:
             if e == "sana_birak" or tekrar >= ayar.TAKILMA_DEVRET or salinim:
                 adimlar.append(f"{adim_no}. kullanıcıya bırakıldı: {sebep[:100]}")
+                hafiza_.eylem(t.url, f"kullanıcıya bırakıldı: {koruma.gizle(sebep, durum['gizli'])[:80]}")
             komut = yield from devret(g, sebep, gizliler=durum["gizli"])
             if komut != "devam":
                 durum["hal"] = ("Kullanıcı görevi durdurdu." if komut == "durdur"
@@ -331,6 +344,7 @@ def dongu(g, gorev_metni, onceki, model, t, durum, derinlik):
                         durum["kod"] = "durduruldu" if komut == "durdur" else "zaman_asimi"
                         return
                     geri_bildirim = dogrulama_sonrasi(t.url, t.bak(), engelli_siteler)
+                    hafiza_.eylem(t.url, dogrulama_ozeti(t.url, engelli_siteler))
             yapilan += 1
             continue
         if e == "oku":
@@ -455,6 +469,11 @@ def yurut(g, gorev_metni, onceki, model, tarayici_ac, serbest=False):
             t.kapat()
         except Exception:
             pass
+    try:  # görevler arası site hafızası: nerede ne yapıldı; dersleri model arka planda çıkarır
+        site_hafizasi.kaydet(gorev_metni, durum["hafiza"].sayfalar, durum["adimlar"], durum.get("hal", ""),
+                             gizliler=durum["gizli"], model=model)
+    except Exception:
+        pass
     if not g.koptu:
         yield {"tur": "gorev_bitti", "durum": durum.get("kod", "tamamlandi")}
         yield from sonuc_yaz(model, gorev_metni, durum)
