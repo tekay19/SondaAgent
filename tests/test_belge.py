@@ -123,3 +123,66 @@ def test_kaydet_yukle_sil():
 @pytest.mark.parametrize("kimlik", ["../ayarlar", "..\\x", "abc", "G" * 32, ""])
 def test_gecersiz_kimlik_dosyaya_ulasmaz(kimlik):
     assert belge.yukle(kimlik) is None and belge.sil(kimlik) is False
+
+
+# ---- soruya göre bağlam (kısa belge tamamen, uzun belge en yakın parçalar)
+import numpy as np
+
+
+def _belge(sayfalar, kimlik="a" * 32, ad="b.pdf"):
+    return {"id": kimlik, "ad": ad, "birim": "sayfa", "sayfalar": [{"no": i, "metin": m} for i, m in enumerate(sayfalar, 1)]}
+
+
+def test_baglam_siniri_modele_gore():
+    assert belge.baglam_siniri("gemini:gemini-flash-latest") == 60000
+    assert belge.baglam_siniri("qwen3.6:35b-a3b") == 15000
+
+
+def test_kisa_belge_tamamen_gider(monkeypatch):
+    monkeypatch.setattr(belge, "embed", lambda m: pytest.fail("kısa belgede embedding gerekmez"))
+    parcalar, tam = belge.baglam([_belge(["giris", "kira artisi yuzde 25"])], "kira artışı", "qwen")
+    assert tam is True and [p["no"] for p in parcalar] == [1, 2] and parcalar[1]["metin"] == "kira artisi yuzde 25"
+
+
+def _sahte_embed(anahtar):
+    """Parçada anahtar kelime varsa soruya yakın vektör verir."""
+    def embed(metinler):
+        return np.array([[1.0, 0.0] if (i == 0 or anahtar in m) else [0.0, 1.0] for i, m in enumerate(metinler)])
+    return embed
+
+
+def test_uzun_belgede_en_yakin_parca_secilir(monkeypatch):
+    monkeypatch.setattr(belge, "embed", _sahte_embed("depozito"))
+    sayfalar = ["dolgu metni " * 300 for _ in range(30)]
+    sayfalar[17] = "Madde 9 depozito iki kira bedelidir. " + "dolgu " * 100
+    parcalar, tam = belge.baglam([_belge(sayfalar)], "depozito ne kadar", "qwen")
+    assert tam is False
+    assert parcalar and any(p["no"] == 18 and "depozito" in p["metin"] for p in parcalar)
+    assert sum(len(p["metin"]) for p in parcalar) <= belge.baglam_siniri("qwen")
+
+
+def test_embedding_yoksa_kelime_eslesmesi(monkeypatch):
+    def patla(m):
+        raise ConnectionError("ollama kapalı")
+    monkeypatch.setattr(belge, "embed", patla)
+    sayfalar = ["dolgu metni " * 300 for _ in range(30)]
+    sayfalar[5] = "Depozito iki kira bedelidir. " + "dolgu " * 100
+    parcalar, _ = belge.baglam([_belge(sayfalar)], "depozito ne kadar", "qwen")
+    assert any(p["no"] == 6 for p in parcalar)
+
+
+def test_cok_uzun_belgede_embeddinge_sinirli_parca_gider(monkeypatch):
+    gorulen = []
+
+    def embed(metinler):
+        gorulen.append(len(metinler))
+        return np.ones((len(metinler), 2)) / np.sqrt(2)
+    monkeypatch.setattr(belge, "embed", embed)
+    belge.baglam([_belge(["kelime " * 500 for _ in range(1000)])], "kelime", "qwen")
+    assert gorulen and max(gorulen) <= belge.EMBED_EN_FAZLA + 1  # +1: sorunun kendisi
+
+
+def test_birden_cok_belge_sirasi_korunur(monkeypatch):
+    monkeypatch.setattr(belge, "embed", _sahte_embed("x"))
+    parcalar, tam = belge.baglam([_belge(["a1", "a2"], "a" * 32, "a.pdf"), _belge(["b1"], "b" * 32, "b.pdf")], "?", "qwen")
+    assert tam and [(p["ad"], p["no"]) for p in parcalar] == [("a.pdf", 1), ("a.pdf", 2), ("b.pdf", 1)]
