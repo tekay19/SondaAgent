@@ -1,8 +1,0 @@
-<!doctype html><html lang="tr"><meta charset="utf-8"><title>Sepetim</title>
-<!-- Trendyol sepeti gibi: "+" arka planda istek atar (1,2 sn), adet ve toplam ancak cevap gelince güncellenir -->
-<p>Xiaomi Powerbank 20000mAh</p>
-<input id="adet" aria-label="Ürün adedi" value="1">
-<button aria-label="Ürün adedi arttırma" onclick="fetch('/yavas/1200/cikis.html').then(() => {
-  adet.value = Number(adet.value) + 1; toplam.textContent = 'Toplam: ' + (1499 * adet.value) + ' TL'; })">+</button>
-<p id="toplam">Toplam: 1499 TL</p>
-</html>

@@ -1,0 +1,64 @@
+{
+  "name": "sonda-agent",
+  "productName": "Sonda Agent",
+  "version": "1.0.0",
+  "description": "Gemini planlar ve denetler, Claude Code / Codex kodlar, Sonda Agent test eder.",
+  "main": "src/main/main.js",
+  "author": "Semih",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist:mac": "electron-builder --mac --publish never",
+    "dist:win": "electron-builder --win --publish never",
+    "pack": "electron-builder --dir",
+    "test": "node --test \"test/*.test.js\""
+  },
+  "dependencies": {
+    "cross-spawn": "^7.0.6",
+    "mammoth": "^1.12.3",
+    "tree-kill": "^1.2.2"
+  },
+  "devDependencies": {
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.semih.sonda-agent",
+    "productName": "Sonda Agent",
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "category": "public.app-category.developer-tools"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "directories": {
+      "buildResources": "build",
+      "output": "dist"
+    }
+  }
+}
