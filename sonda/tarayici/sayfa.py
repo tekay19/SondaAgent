@@ -1,0 +1,381 @@
+"""Tek bir sekmenin kontrolü: bak, tıkla, yaz, kaydır... Güvenlik kararları koruma.py'dedir; burası uygular."""
+import re
+import time
+from contextlib import contextmanager
+from urllib.parse import urlparse
+
+import trafilatura
+
+from ..koruma import _kayitli_alan, sade
+from .js import BAK, CAPTCHA_BASLIKLARI, CAPTCHA_KUTULARI, ENGEL
+
+# Bilinen robot doğrulaması sunucuları -> çerçeve adresinin yol öneki. Adresin herhangi bir yerinde geçen kelimeye
+# değil, gerçek ana makineye bakılır (final inceleme: "evil.example/?hcaptcha.com" captcha sayılıyordu).
+CAPTCHA_SUNUCULARI = {"challenges.cloudflare.com": "/", "hcaptcha.com": "/", "newassets.hcaptcha.com": "/",
+                      "assets.hcaptcha.com": "/", "www.google.com": "/recaptcha/", "google.com": "/recaptcha/",
+                      "www.recaptcha.net": "/recaptcha/", "recaptcha.net": "/recaptcha/"}
+
+
+# "Basılı tut" doğrulaması (PerimeterX türü; canlı test: Kariyer.net "İnsan olduğunuzu doğrulamak için Basılı Tutun").
+# Onay kutusu yoktur, Sonda çözmez: tanınır ve robot doğrulaması gibi kullanıcıya bırakılır / atlanır. Bir kılavuzda
+# geçen "press and hold" captcha sayılmasın diye kısa sayfa ve doğrulama sözü de aranır.
+_BASILI_TUT = re.compile(r"basili tut|press (&|and) hold|hold to confirm")
+_DOGRULAMA_SOZU = re.compile(r"dogrula|insan|robot|human|verify|bot degil|not a bot")
+BASILI_TUT_METNI = 1500
+
+
+def basili_tut_mu(metin):
+    metin = sade(metin)
+    return len(metin) < BASILI_TUT_METNI and bool(_BASILI_TUT.search(metin)) and bool(_DOGRULAMA_SOZU.search(metin))
+
+
+# Çerez onayı: tıklama bir örtü yüzünden engellenince kod çerez penceresini onaylar (gölge DOM dahil; canlı #201
+# Teknosa EFILLI-LAYOUT-DYNAMIC). Yalnızca çevresinde çerez/KVKK metni olan onay düğmesine basılır: üyelik ya da
+# teklif penceresindeki "Kabul et"e basılmaz.
+CEREZ_DUGMESI = re.compile(r"^\s*((tüm|tümünü|tüm çerezleri|hepsini|çerezleri)\s+)?(kabul et|kabul ediyorum)\s*$"
+                           r"|^\s*(accept|accept all|accept all cookies|accept cookies|allow all|allow all cookies"
+                           r"|i agree|got it|anladım|tamam)\s*$", re.I)
+CEREZ_BAGLAMI = """e => {
+  const re = /çerez|cerez|cookie|kvkk|kişisel veri|gizlilik|privacy|consent/i;
+  let d = e;
+  for (let i = 0; i < 10 && d; i++) {
+    if (re.test(d.innerText || d.textContent || "")) return true;
+    d = d.parentElement || (d.getRootNode && d.getRootNode().host) || null;
+  }
+  return false;
+}"""
+
+
+def captcha_adresi_mi(url):
+    p = urlparse(url)
+    onek = CAPTCHA_SUNUCULARI.get((p.hostname or "").lower())
+    return onek is not None and p.path.startswith(onek)
+
+
+ZAMAN_ASIMI = 20000
+YATIS_SINIRI = 4  # sn: tıklamanın başlattığı arka plan isteklerini en çok bu kadar bekle
+EKRAN_SINIRI = 5000  # ms: ekran görüntüsü için
+
+
+class TiklamaEngeli(Exception):
+    """Tıklanacak öğenin üstünde başka bir öğe (çerez bildirimi, pop-up) var."""
+
+
+class SekmeKapandi(Exception):
+    """Sonda'nın sekmesi (ve dönülecek önceki sekmeler) kapandı; büyük ihtimalle kullanıcı kapattı."""
+
+
+def _baska_site(yeni_url, simdiki_url):
+    """Açılan pencere başka bir sitede mi? about:blank gibi adresler sayfanın kendi penceresidir."""
+    y, s = urlparse(yeni_url), urlparse(simdiki_url)
+    if y.scheme not in ("http", "https") or not y.hostname or not s.hostname:
+        return False
+    return _kayitli_alan(y.hostname)[0] != _kayitli_alan(s.hostname)[0]
+
+
+class Tarayici:
+    def __init__(self, sayfa, kapat=None):
+        self._kapat = kapat
+        self._onceki = []  # açılır pencereye geçince önceki sekmeler; pencere kapanırsa geri dönülür
+        self._kapatilan = []  # başka sitede açılıp kapatılan pencerelerin adresleri (modele bir kez bildirilir)
+        self._ac(sayfa)
+
+    def _ac(self, sayfa):
+        self._sayfa = sayfa
+        sayfa.on("popup", self._acilir_pencere)
+        sayfa.on("dialog", lambda d: d.dismiss())  # confirm("Sipariş verilsin mi?") gibi pencereler reddedilir
+
+    def _acilir_pencere(self, yeni):
+        # Başka sitede açılan pencere çoğunlukla reklamdır (Amazon'da ticari.renault.com.tr): geçilmez, kapatılır
+        if _baska_site(yeni.url, self._sayfa.url):
+            self._kapatilan.append(yeni.url)
+            try:
+                yeni.close()
+            except Exception:
+                pass
+            return
+        self._onceki.append(self._sayfa)
+        self._ac(yeni)  # window.open ile açılan sekmede çalışmaya devam et
+
+    def kapatilan_pencereler(self):
+        adresler, self._kapatilan = self._kapatilan, []
+        return adresler
+
+    @property
+    def sayfa(self):
+        # Senkron Playwright olayları (açılır pencerenin kapanması gibi) ancak bir çağrı sırasında işler
+        try:
+            self._sayfa.wait_for_timeout(1)
+        except Exception:
+            pass
+        while self._sayfa.is_closed() and self._onceki:
+            self._sayfa = self._onceki.pop()
+        if self._sayfa.is_closed():
+            raise SekmeKapandi("Sonda'nın sekmesi kapatıldı.")
+        return self._sayfa
+
+    @property
+    def url(self):
+        try:
+            return self.sayfa.url
+        except SekmeKapandi:
+            return self._sayfa.url  # son bilinen adres
+
+    @property
+    def baslik(self):
+        try:
+            return self.sayfa.title()
+        except Exception:
+            return ""
+
+    def _bekle(self, bekleyen=None):
+        try:
+            self.sayfa.wait_for_load_state("domcontentloaded", timeout=ZAMAN_ASIMI)
+        except SekmeKapandi:
+            raise
+        except Exception:
+            pass
+        try:
+            self.sayfa.wait_for_timeout(700)  # JS ile çizilen içerik için kısa pay
+            if bekleyen:
+                self._istekleri_bekle(bekleyen)
+                self.sayfa.wait_for_load_state("domcontentloaded", timeout=ZAMAN_ASIMI)  # geçiş olduysa yeni sayfa
+        except SekmeKapandi:
+            raise
+        except Exception:
+            pass  # açılır pencere bu arada kapandıysa sonraki erişimde önceki sekmeye dönülür
+
+    @contextmanager
+    def _istekler(self):
+        """Bu blokta başlayan ve henüz bitmemiş istekler: XHR/fetch (sepet adedi, filtre gibi arka plan güncellemeleri)
+        ve ana çerçevenin sayfa geçişi (bağlantı, form). Kullanıcının Chrome'unda okuma geçişi kendiliğinden beklemiyor."""
+        sayfa, bekleyen = self.sayfa, set()
+
+        def basladi(istek):
+            try:
+                gecis = istek.is_navigation_request() and istek.frame == sayfa.main_frame
+            except Exception:  # service worker isteklerinin çerçevesi yoktur
+                gecis = False
+            if gecis or istek.resource_type in ("xhr", "fetch"):
+                bekleyen.add(istek)
+
+        def bitti(istek):
+            bekleyen.discard(istek)
+        olaylar = (("request", basladi), ("requestfinished", bitti), ("requestfailed", bitti))
+        for ad, f in olaylar:
+            sayfa.on(ad, f)
+        try:
+            yield bekleyen
+        finally:
+            for ad, f in olaylar:
+                sayfa.remove_listener(ad, f)
+
+    def _istekleri_bekle(self, bekleyen):
+        """Tıklamanın başlattığı istekler bitene kadar bekler (en çok YATIS_SINIRI sn); yönlendirme ya da zincirleme
+        istek için kısa bir pay daha verir. Yoksa model güncellenmemiş sayfayı görüp aynı butona yeniden basar."""
+        son = time.monotonic() + YATIS_SINIRI
+        while time.monotonic() < son:
+            if not bekleyen:
+                self.sayfa.wait_for_timeout(300)  # cevap çizilsin; yeni istek başladıysa onu da bekle
+                if not bekleyen:
+                    return
+            self.sayfa.wait_for_timeout(100)
+
+    def _loc(self, no):
+        # .first yok: aynı numarayı taşıyan ikinci bir öğe (gölge DOM tuzağı) varsa Playwright işlemi reddeder
+        return self.sayfa.locator(f'[data-sonda-id="{int(no)}"]')
+
+    def bak(self):
+        # evaluate zaman aşımı almaz: JS'i kilitlenen bir sayfa tek görev işçisini sonsuza dek bekletirdi.
+        # wait_for_function zaman aşımı alır; aralıklı yoklama arka plan sekmesinde de çalışır (rAF durur).
+        tutamac = self.sayfa.wait_for_function("() => (" + BAK + ")()", polling=100, timeout=ZAMAN_ASIMI)
+        sayfa = tutamac.json_value()
+        sayfa["captcha"] = bool(self._captcha_cerceveleri()) or \
+            any(b in sayfa["baslik"].lower() for b in CAPTCHA_BASLIKLARI) or basili_tut_mu(sayfa.get("metin", ""))
+        return sayfa
+
+    def _captcha_cerceveleri(self):
+        """Görünür robot doğrulaması çerçeveleri ve ekrandaki kutuları (görünmez reCAPTCHA sayılmaz)."""
+        ana, sonuc = self.sayfa.main_frame, []
+        for f in self.sayfa.frames:
+            if f is ana or not captcha_adresi_mi(f.url):
+                continue
+            try:
+                kutu = f.frame_element().bounding_box()
+            except Exception:
+                continue
+            if kutu and kutu["width"] > 20 and kutu["height"] > 20:
+                sonuc.append((f, kutu))
+        return sonuc
+
+    def captcha_onayla(self):
+        """Robot doğrulamasının onay kutusunu işaretler (kullanıcı izin verdi). Resimli bulmaca çözülmez."""
+        for cerceve, alan in self._captcha_cerceveleri():
+            x, y = alan["x"] + min(30, alan["width"] / 2), alan["y"] + alan["height"] / 2
+            try:  # o noktada en üstte gerçekten bu çerçeve mi? (altındaki bir butona tıklatılmasın)
+                ustte = cerceve.frame_element().evaluate("(f, n) => document.elementFromPoint(n[0], n[1]) === f", [x, y])
+            except Exception:
+                ustte = False
+            if not ustte:
+                continue
+            for secici in CAPTCHA_KUTULARI:
+                kutu = cerceve.locator(secici).first
+                try:
+                    if kutu.count() and kutu.is_visible():
+                        kutu.click(timeout=5000)
+                        self._bekle()
+                        return True
+                except Exception:
+                    continue
+            # Cloudflare: kutu kapalı shadow DOM'da, seçiciyle bulunamaz; insan gibi ekrandaki yerine (sol) tıkla
+            self.sayfa.mouse.click(x, y)
+            self._bekle()
+            return True
+        return False
+
+    def oge_bilgisi(self, no):
+        """Koruma kararı için öğe bilgisi. Playwright'ın izole dünyasından okunur: sayfa ana dünyada DOM'u
+        (getAttribute, innerText...) değiştirse de koruma gerçeği görür. Numara birden fazla öğedeyse None."""
+        loc = self._loc(no)
+        try:
+            if loc.count() != 1:
+                return None
+            oge, form = self._acikla(loc, int(no))
+            kardesler = []
+            if form is not None:
+                alanlar = form.locator("input:not([type=hidden]), select, textarea")
+                for i in range(min(alanlar.count(), 20)):
+                    kardesler.append(self._acikla(alanlar.nth(i), 0)[0])
+            return {"oge": oge, "form_ogeleri": kardesler}
+        except SekmeKapandi:
+            raise
+        except Exception:
+            return None
+
+    def _acikla(self, loc, no):
+        z = 3000
+
+        def ozellik(ad):
+            return loc.get_attribute(ad, timeout=z) or ""
+        etiket = next((t for t in ("a", "button", "input", "select", "textarea", "summary")
+                       if loc.locator(f"xpath=self::{t}").count()), "div")
+        tip = ozellik("type").lower() if etiket in ("input", "button") else ""
+        d = {"no": no, "etiket": etiket, "rol": ozellik("role"), "tip": tip, "ad": ozellik("name"),
+             "kimlik": ozellik("id"), "otomatik": ozellik("autocomplete").lower(), "yer": ozellik("placeholder"),
+             "aria": ozellik("aria-label"), "baslik": ozellik("title"), "href": ozellik("href") if etiket == "a" else "",
+             "deger": "", "ekranda": True}
+        metin = ""
+        if etiket in ("input", "select", "textarea"):
+            if d["kimlik"]:
+                etiketler = self.sayfa.locator(f'label[for="{d["kimlik"].replace(chr(34), "")}"]')
+                if etiketler.count():
+                    metin = etiketler.first.inner_text(timeout=z)
+            if not metin:
+                ata = loc.locator("xpath=ancestor::label[1]")
+                if ata.count():
+                    metin = ata.inner_text(timeout=z)
+            try:
+                d["deger"] = loc.input_value(timeout=z)[:80]
+            except Exception:
+                pass
+            if tip in ("checkbox", "radio"):
+                d["secili"] = loc.is_checked(timeout=z)
+        else:
+            metin = loc.inner_text(timeout=z)
+        d["metin"] = " ".join(metin.split())[:120]
+        form = loc.locator("xpath=ancestor::form[1]")
+        var = form.count() > 0
+        d["form"] = 0 if var else -1
+        d["form_eylem"] = (form.get_attribute("action", timeout=z) or "") if var else ""
+        return d, (form if var else None)
+
+    def git(self, url):
+        self.sayfa.goto(url, wait_until="domcontentloaded", timeout=ZAMAN_ASIMI)
+        self._bekle()
+
+    def tikla(self, no):
+        loc = self._loc(no)
+        loc.evaluate("e => { const a = e.closest('a'); if (a && a.target) a.removeAttribute('target'); }")
+        with self._istekler() as bekleyen:
+            try:
+                loc.click(timeout=4000, no_wait_after=True)
+            except Exception:
+                # Upwork'te görülen zaman aşımı: çoğunlukla üstte çerez bildirimi/pop-up vardır; modele nedenini söyle
+                try:
+                    engel = loc.evaluate(ENGEL, timeout=3000)
+                except Exception:
+                    engel = None
+                if engel and self.cerez_onayla():
+                    try:  # örtü çerez penceresiydi ve kapandı: asıl tıklama bir kez daha
+                        loc.click(timeout=4000, no_wait_after=True)
+                        self._bekle(bekleyen)
+                        return
+                    except Exception:
+                        engel = loc.evaluate(ENGEL, timeout=3000) if loc.count() else None
+                if engel:
+                    raise TiklamaEngeli(f"Tıklanacak öğenin üstünde başka bir öğe var: “{engel}”. Önce onu kapat "
+                                        "(ör. çerezleri kabul et / pop-up'ı kapat) ya da sayfayı kaydır.") from None
+                # Kör yeniden tıklama yok: tıklama olmuş da olabilir, ya da öğe değişmiş olabilir (koruma yeniden bakmalı)
+                try:
+                    loc.scroll_into_view_if_needed(timeout=2000)
+                except Exception:
+                    pass
+                raise RuntimeError("Tıklama zaman aşımına uğradı (tıklanmış da olabilir). Sayfanın yeni haline bak; "
+                                   "gerekirse öğeyi yeniden seçip tekrar dene.") from None
+            self._bekle(bekleyen)
+
+    def cerez_onayla(self):
+        """Görünür çerez onay düğmesine basar (gölge DOM dahil); bastıysa True."""
+        for d in self.sayfa.get_by_role("button", name=CEREZ_DUGMESI).all()[:6]:
+            try:
+                if d.is_visible() and d.evaluate(CEREZ_BAGLAMI):
+                    d.click(timeout=3000)
+                    self.sayfa.wait_for_timeout(400)
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def yaz(self, no, metin, enter=False):
+        loc = self._loc(no)
+        loc.fill(str(metin), timeout=5000)
+        if enter:
+            loc.press("Enter")
+            self._bekle()
+
+    def sec(self, no, deger):
+        loc = self._loc(no)
+        with self._istekler() as bekleyen:
+            try:
+                loc.select_option(label=str(deger), timeout=5000)
+            except Exception:
+                loc.select_option(value=str(deger), timeout=5000)
+            self._bekle(bekleyen)
+
+    def kaydir(self, yon="asagi"):
+        self.sayfa.mouse.wheel(0, -700 if yon == "yukari" else 700)
+        self.sayfa.wait_for_timeout(500)
+
+    def geri(self):
+        self.sayfa.go_back(wait_until="domcontentloaded", timeout=ZAMAN_ASIMI)
+        self._bekle()
+
+    def vurgula(self, no):
+        try:
+            self.sayfa.bring_to_front()
+            self._loc(no).evaluate("e => { e.style.outline = '4px solid #e5484d'; e.style.outlineOffset = '3px';"
+                                   " e.scrollIntoView({ block: 'center' }); }", timeout=3000)
+        except Exception:
+            pass
+
+    def ekran_goruntusu(self):
+        # Chrome arka plandaki sekmede kare üretmez; varsayılan 30 sn beklemek her adımı yarım dakika uzatıyordu
+        return self.sayfa.screenshot(type="jpeg", quality=60, timeout=EKRAN_SINIRI)
+
+    def tam_metin(self):
+        metin = trafilatura.extract(self.sayfa.content(), include_tables=True) or ""
+        return metin or self.sayfa.evaluate("() => document.body ? document.body.innerText : ''")
+
+    def kapat(self):
+        if self._kapat:
+            self._kapat()

@@ -1,0 +1,416 @@
+import pytest
+
+from sonda.tarayici import SekmeKapandi
+
+from conftest import ihlaller
+
+
+def bul(sayfa, metin):
+    return next(o for o in sayfa["ogeler"] if metin in (o["metin"] + o["yer"] + o["aria"]))
+
+
+def test_bak_numarali_ogeleri_listeler(tarayici, site):
+    tarayici.git(f"{site}/magaza/index.html")
+    s = tarayici.bak()
+    assert s["baslik"] == "TeknoPazar" and s["url"].endswith("/magaza/index.html")
+    kutu = bul(s, "Ürün, kategori")
+    assert kutu["etiket"] == "input" and kutu["ad"] == "q" and kutu["form"] == 0
+    assert [o["no"] for o in s["ogeler"]] == list(range(1, len(s["ogeler"]) + 1))
+    assert "TeknoPazar" in s["metin"]
+
+
+def test_yaz_ve_enter_ile_arama(tarayici, site):
+    tarayici.git(f"{site}/magaza/index.html")
+    kutu = bul(tarayici.bak(), "Ürün, kategori")
+    tarayici.yaz(kutu["no"], "nvme", enter=True)
+    assert "ara.html?q=nvme" in tarayici.url
+    assert "Kioxia" in tarayici.bak()["metin"]
+
+
+def test_yaz_enter_basmaz(tarayici, site):
+    tarayici.git(f"{site}/magaza/index.html")
+    kutu = bul(tarayici.bak(), "Ürün, kategori")
+    tarayici.yaz(kutu["no"], "nvme")
+    assert tarayici.url.endswith("/magaza/index.html")
+
+
+def test_tikla_baglantiyi_acar(tarayici, site):
+    tarayici.git(f"{site}/magaza/ara.html?q=kioxia")
+    tarayici.tikla(bul(tarayici.bak(), "Kioxia")["no"])
+    assert "urun.html?id=2" in tarayici.url and tarayici.baslik.startswith("Kioxia")
+
+
+def test_sec_ve_siralama(tarayici, site):
+    tarayici.git(f"{site}/magaza/ara.html?q=ssd")
+    secim = next(o for o in tarayici.bak()["ogeler"] if o["etiket"] == "select")
+    assert "Fiyat artan" in secim["secenekler"]
+    tarayici.sec(secim["no"], "Fiyat artan")
+    ilk = next(o for o in tarayici.bak()["ogeler"] if o["etiket"] == "a")
+    assert "Kingston" in ilk["metin"]
+
+
+def test_yeni_sekme_baglantisi_ayni_sekmede_acilir(tarayici, site):
+    tarayici.git(f"{site}/magaza/urun.html?id=1")
+    tarayici.tikla(bul(tarayici.bak(), "yeni sekme")["no"])
+    assert tarayici.url.endswith("/magaza/index.html")
+    assert len(tarayici.sayfa.context.pages) == 1
+
+
+def test_oge_bilgisi_form_kardeslerini_verir(tarayici, site):
+    tarayici.git(f"{site}/giris.html")
+    s = tarayici.bak()
+    bilgi = tarayici.oge_bilgisi(bul(s, "Giriş Yap")["no"])
+    assert bilgi["oge"]["metin"] == "Giriş Yap"
+    assert any(f["tip"] == "password" for f in bilgi["form_ogeleri"])
+
+
+def test_oge_bilgisi_olmayan_numara(tarayici, site):
+    tarayici.git(f"{site}/giris.html")
+    tarayici.bak()
+    assert tarayici.oge_bilgisi(999) is None
+
+
+def test_etiket_metni_label_icinden_gelir(tarayici, site):
+    tarayici.git(f"{site}/magaza/odeme.html")
+    kart = next(o for o in tarayici.bak()["ogeler"] if o["ad"] == "cardnumber")
+    assert "Kart Numarası" in kart["metin"] and kart["otomatik"] == "cc-number"
+
+
+def test_kaydir_geri_ekran_vurgula_tam_metin(tarayici, site):
+    tarayici.git(f"{site}/magaza/index.html")
+    tarayici.git(f"{site}/magaza/ara.html?q=ssd")
+    tarayici.bak()
+    tarayici.kaydir("asagi")
+    tarayici.vurgula(1)
+    assert tarayici.ekran_goruntusu()[:2] == b"\xff\xd8"  # JPEG
+    assert "Samsung" in tarayici.tam_metin()
+    tarayici.geri()
+    assert tarayici.url.endswith("/magaza/index.html")
+
+
+def test_kapali_adres_hata_firlatir(tarayici):
+    with pytest.raises(Exception):
+        tarayici.git("http://127.0.0.1:9/")  # kapalı port: hata beklenir, gorev.py yakalar
+
+
+def test_bu_testler_ihlal_uretmez(tarayici, site):
+    tarayici.git(f"{site}/magaza/odeme.html")
+    assert ihlaller(tarayici) == []
+
+
+def test_baglan_baglantiyi_yeniden_kullanir(monkeypatch):
+    """Gerçek Chrome her CDP bağlantısında izin sorar: baglan() bağlantıyı önbelleğe almalı."""
+    import threading
+
+    from sonda.tarayici import baglanti as tr
+    hazir, bitti = threading.Event(), threading.Event()
+
+    def sunucu():  # uzaktan hata ayıklama portu açık bir Chromium (kullanıcının Chrome'u yerine)
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as pw:
+            b = pw.chromium.launch(headless=True, args=["--remote-debugging-port=9339"])
+            hazir.set()
+            bitti.wait(60)
+            b.close()
+    threading.Thread(target=sunucu, daemon=True).start()
+    assert hazir.wait(30)
+    monkeypatch.setattr(tr, "_cdp_adresi", lambda: ["http://127.0.0.1:9339"])
+    try:
+        t1 = tr.baglan()
+        t2 = tr.baglan()
+        assert t1.sayfa.context.browser is t2.sayfa.context.browser
+        assert t1.sayfa is not t2.sayfa
+        t1.kapat()  # gerçek Chrome'da hiçbir şey kapatmaz
+        assert t2.sayfa.context.browser.is_connected()
+    finally:
+        tr.baglantiyi_kes()
+        bitti.set()
+
+
+def test_yerel_tarayici_ayari(monkeypatch):
+    """Geliştirme/test için: SONDA_YEREL_TARAYICI ayarlıysa kullanıcının Chrome'u yerine Playwright Chromium'u açılır."""
+    from sonda.tarayici import baglanti as tr
+    monkeypatch.setenv("SONDA_YEREL_TARAYICI", "gizli")
+    monkeypatch.setattr(tr, "_cdp_adresi", lambda: [])
+    monkeypatch.setattr(tr, "CHROME", tr.Path("yok/chrome.exe"))  # yedek profil açılmasın
+    try:
+        t = tr.baglan()
+        assert t.sayfa.context.browser.is_connected()
+    finally:
+        tr.baglantiyi_kes()
+
+
+def test_acilir_pencere_kapaninca_onceki_sekmeye_doner(tarayici, site):
+    tarayici.git(f"{site}/acilir.html")
+    tarayici.tikla(bul(tarayici.bak(), "Pencere aç")["no"])
+    import time
+    son = time.monotonic() + 5  # pencere 300 ms sonra kendini kapatır; yüklü makinede gecikebilir
+    while not tarayici.url.endswith("/acilir.html") and time.monotonic() < son:
+        time.sleep(0.1)
+    assert tarayici.url.endswith("/acilir.html")
+    assert tarayici.bak()["baslik"] == "Açılır pencere"
+
+
+def test_baska_sitede_acilan_pencereye_gecilmez(tarayici, site):
+    """Canlı test (Amazon): bir tıklama ticari.renault.com.tr reklam penceresi açtı; Sonda ona geçip bir süre orada
+    dolaştı. Başka sitede açılan pencere kapatılır, Sonda kendi sayfasında kalır ve açılan adres bildirilir."""
+    tarayici.git(f"{site}/reklam.html")
+    tarayici.tikla(bul(tarayici.bak(), "Yeni (3) teklif")["no"])
+    tarayici.sayfa.wait_for_timeout(500)
+    assert tarayici.url.endswith("/reklam.html")
+    assert len(tarayici.sayfa.context.pages) == 1
+    assert [u.split("/")[-1] for u in tarayici.kapatilan_pencereler()] == ["giris.html"]
+    assert tarayici.kapatilan_pencereler() == []  # bir kez bildirilir
+
+
+def test_sekme_kapaninca_sekme_kapandi_hatasi(tarayici, site):
+    from sonda.tarayici import baglanti as tr
+    tarayici.git(f"{site}/giris.html")
+    tarayici.sayfa.close()
+    with pytest.raises(SekmeKapandi):
+        tarayici.bak()
+
+
+def test_metin_ekranda_gorunen_bolumu_verir_ve_kaydirinca_degisir(tarayici, site):
+    tarayici.git(f"{site}/uzun.html")
+    ust = tarayici.bak()
+    assert "Bölüm 1 " in ust["metin"] and "Bölüm 25" not in ust["metin"]
+    assert ust["kaydirma"]["y"] == 0 and ust["kaydirma"]["yukseklik"] > ust["kaydirma"]["ekran"] * 3
+    for _ in range(20):
+        tarayici.kaydir("asagi")
+    alt = tarayici.bak()
+    assert "Bölüm 30" in alt["metin"] and "Yorum 1" in alt["metin"] and "Bölüm 1 " not in alt["metin"]
+    assert alt["kaydirma"]["y"] > 0
+
+
+def test_daha_fazla_goster_butonu_icerik_acar(tarayici, site):
+    tarayici.git(f"{site}/uzun.html")
+    tarayici.tikla(bul(tarayici.bak(), "Daha fazla göster")["no"])
+    assert "gizli yorum açıldı" in tarayici.bak()["metin"]
+
+
+
+def test_ustu_kapali_butona_tiklama_engeli_soyler(tarayici, site):
+    """Upwork'te görülen: tıklama zaman aşımı. Üstünde çerez/pop-up varsa model nedenini öğrenmeli."""
+    from sonda.tarayici import TiklamaEngeli
+    tarayici.git(f"{site}/engel.html")  # çerez penceresi kendiliğinden onaylanır, asıl tıklama yapılır
+    tarayici.tikla(bul(tarayici.bak(), "Devam et")["no"])
+    assert tarayici.sayfa.inner_text("#sonuc") == "Devam edildi"
+    assert tarayici.sayfa.locator("#cerez").count() == 0
+
+
+def test_kaydirilan_alandaki_butona_tiklanir(tarayici, site):
+    tarayici.git(f"{site}/engel.html")
+    tarayici.sayfa.evaluate("document.getElementById('cerez').remove()")
+    tarayici.tikla(bul(tarayici.bak(), "İçteki buton")["no"])
+    assert tarayici.sayfa.inner_text("#sonuc") == "İçteki tıklandı"
+
+
+def test_captcha_algilanir_ve_onay_kutusu_isaretlenir(tarayici, site):
+    tarayici.git(f"{site}/captcha.html")
+    assert tarayici.bak()["captcha"] is True
+    assert tarayici.captcha_onayla() is True
+    assert tarayici.sayfa.inner_text("#durum") == "Doğrulandı"
+    assert tarayici.bak()["captcha"] is False
+
+
+def test_captcha_olmayan_sayfa(tarayici, site):
+    tarayici.git(f"{site}/giris.html")
+    assert tarayici.bak()["captcha"] is False
+    assert tarayici.captcha_onayla() is False
+
+
+
+def test_kapali_shadow_dom_captcha_ekrandaki_yerinden_tiklanir(tarayici, site):
+    """Cloudflare onay kutusu kapalı shadow DOM'da: seçiciyle bulunamaz, iframe'in ekrandaki yerine tıklanır."""
+    tarayici.git(f"{site}/captcha_cf.html")
+    assert tarayici.bak()["captcha"] is True
+    assert tarayici.captcha_onayla() is True
+    tarayici.sayfa.wait_for_timeout(300)
+    assert tarayici.sayfa.inner_text("#durum") == "Doğrulandı"
+    assert tarayici.bak()["captcha"] is False  # 0x0 görünmez reCAPTCHA çerçevesi captcha sayılmaz
+
+
+def test_cloudflare_bekleme_ekrani_captcha_sayilir(tarayici, site):
+    tarayici.git(f"{site}/bir_dakika.html")
+    assert tarayici.bak()["captcha"] is True
+
+
+
+# ---- Final inceleme I4: tıklama zaman aşımından sonra kör yeniden tıklama yok
+def test_zaman_asimli_tiklama_tekrarlanmaz(tarayici, site):
+    tarayici.git(f"{site}/yavas_tik.html")
+    no = bul(tarayici.bak(), "Sepete ekle")["no"]
+    try:
+        tarayici.tikla(no)
+    except Exception:
+        pass
+    tarayici.sayfa.wait_for_timeout(7000)
+    assert tarayici.sayfa.evaluate("localStorage.getItem('tik')") == "1"
+
+
+# ---- Yavaş sunucu (Heroku gibi): tıklama/Enter sonrası bak() yeni sayfayı bekler; eski sayfayı okursa model aynı
+# butona yeniden basar ("Sepete Ekle"de çift işlem). Canlı testte kullanıcının Chrome'unda Logout iki kez basılmıştı.
+def test_yavas_sunucuda_tiklamadan_sonra_yeni_sayfa_beklenir(tarayici, site):
+    tarayici.git(f"{site}/yavas_link.html")
+    tarayici.tikla(bul(tarayici.bak(), "Çıkış")["no"])
+    s = tarayici.bak()
+    assert s["url"].endswith("/cikis.html") and "Çıkış yapıldı" in s["metin"]
+
+
+def test_yavas_sunucuda_aramada_enterdan_sonra_sonuc_beklenir(tarayici, site):
+    tarayici.git(f"{site}/yavas_link.html")
+    tarayici.yaz(bul(tarayici.bak(), "Ara")["no"], "deneme", enter=True)
+    s = tarayici.bak()
+    assert s["url"].endswith("/cikis.html?q=deneme") and "Çıkış yapıldı" in s["metin"]
+
+
+def test_tikla_donunce_bagli_yeni_sayfa_gelmis_olur(tarayici, site):
+    """Canlı test (kullanıcının Chrome'u): Logout bağlantısından sonra okuma geçişi beklemedi, eski sayfa görülünce
+    model iki kez daha bastı. Tıklamanın başlattığı sayfa geçişi tikla içinde beklenir."""
+    tarayici.git(f"{site}/yavas_link.html")
+    tarayici.tikla(bul(tarayici.bak(), "Çıkış")["no"])
+    assert tarayici.sayfa.url.endswith("/cikis.html")
+
+
+def test_ekran_goruntusu_takilirsa_kisa_surede_vazgecilir():
+    """Canlı test: Chrome arka plandaki sekmede ekran görüntüsü üretmiyor; Playwright varsayılan 30 sn bekliyordu ve
+    az öğeli sayfalarda her adım ~33 sn sürdü."""
+    import time
+    from sonda.tarayici import Tarayici
+
+    class TakilanSayfa:
+        def on(self, *a): pass
+        def wait_for_timeout(self, ms): pass
+        def is_closed(self): return False
+        def screenshot(self, timeout=30000, **k):
+            time.sleep(timeout / 1000)
+            raise TimeoutError("Timeout exceeded")
+    t = Tarayici(TakilanSayfa())
+    basla = time.monotonic()
+    with pytest.raises(TimeoutError):
+        t.ekran_goruntusu()
+    assert time.monotonic() - basla < 6
+
+
+def test_tiklamanin_baslattigi_istek_bitince_sayfa_okunur(tarayici, site):
+    """Canlı Trendyol testi: "+" sonrası sepet arka planda güncellenirken sayfa okundu, adet hâlâ 1 görününce model
+    yeniden bastı (ikinci tıklama tutsaydı adet 3 olurdu)."""
+    tarayici.git(f"{site}/adet.html")
+    tarayici.tikla(bul(tarayici.bak(), "Ürün adedi arttırma")["no"])
+    s = tarayici.bak()
+    assert bul(s, "Ürün adedi")["deger"] == "2" and "Toplam: 2998 TL" in s["metin"]
+
+
+# ---- Final inceleme I5: captcha kılığındaki çerçeve altındaki butona tıklatamaz
+def test_sahte_captcha_cercevesi_tiklatamaz(tarayici, site):
+    from conftest import ihlaller
+    tarayici.git(f"{site}/captcha_tuzak.html")
+    tarayici.sayfa.wait_for_timeout(500)
+    tarayici.captcha_onayla()
+    tarayici.sayfa.wait_for_timeout(300)
+    assert ihlaller(tarayici) == []
+
+
+def test_captcha_adresi_alan_adina_gore_tanınır():
+    from sonda.tarayici.sayfa import captcha_adresi_mi
+    assert captcha_adresi_mi("https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/if/ov2/")
+    assert captcha_adresi_mi("https://www.google.com/recaptcha/api2/anchor?k=x")
+    assert captcha_adresi_mi("https://newassets.hcaptcha.com/captcha/v1/abc/static/hcaptcha.html")
+    assert not captcha_adresi_mi("https://evil.example/x?hcaptcha.com")
+    assert not captcha_adresi_mi("https://evil.example/turnstile")
+    assert not captcha_adresi_mi("https://www.google.com/search?q=recaptcha")
+
+
+
+# ---- Final inceleme I3: sayfa ana dünyada DOM'u değiştirip korumayı kandıramaz
+def test_yalanci_sayfa_korumayi_kandiramaz(tarayici, site):
+    from sonda import koruma
+    tarayici.git(f"{site}/yalanci.html")
+    s = tarayici.bak()
+    al = next(o for o in s["ogeler"] if o["kimlik"] == "al")
+    kart = next(o for o in s["ogeler"] if o["kimlik"] == "kart")
+    bilgi_al = tarayici.oge_bilgisi(al["no"])
+    bilgi_kart = tarayici.oge_bilgisi(kart["no"])
+    assert "Satın al" in bilgi_al["oge"]["metin"]
+    assert not koruma.kontrol({"eylem": "tikla", "no": al["no"]}, bilgi_al["oge"], bilgi_al["form_ogeleri"]).izin
+    assert bilgi_kart["oge"]["otomatik"] == "cc-number"
+    assert not koruma.kontrol({"eylem": "yaz", "no": kart["no"], "metin": "4111"}, bilgi_kart["oge"]).izin
+
+
+def test_golge_domdaki_ayni_numarali_tuzak(tarayici, site):
+    from conftest import ihlaller
+    tarayici.git(f"{site}/yalanci.html")
+    no = next(o for o in tarayici.bak()["ogeler"] if o["kimlik"] == "yorum")["no"]
+    tarayici.sayfa.evaluate("""n => {
+        const kap = document.createElement('div'); document.body.prepend(kap);
+        const kok = kap.attachShadow({ mode: 'open' });
+        kok.innerHTML = `<button data-yasak data-sonda-id="${n}" onclick="ihlalEkle('tiklama', 'golge')">Öde</button>`;
+    }""", no)
+    assert tarayici.oge_bilgisi(no) is None  # aynı numara iki öğede: güvenilmez
+    with pytest.raises(Exception):
+        tarayici.tikla(no)
+    assert ihlaller(tarayici) == []
+
+
+# ---- Final inceleme I2: kilitlenen sayfa görev işçisini sonsuza dek bekletmez
+def test_kilitli_sayfada_bak_zaman_asimina_ugrar(tarayici, site, monkeypatch):
+    import time
+    from sonda.tarayici import sayfa as sm
+    monkeypatch.setattr(sm, "ZAMAN_ASIMI", 3000)
+    tarayici.git(f"{site}/mesgul.html")
+    time.sleep(0.8)  # sayfanın JS'i kilitlendi
+    bas = time.monotonic()
+    with pytest.raises(Exception):
+        tarayici.bak()
+    assert time.monotonic() - bas < 8
+
+
+# ---- Upwork: gizli (sr-only) onay kutusu listelenmediği için contract-to-hire işaretlenemedi
+def test_gizli_onay_kutusu_gorunen_etiketiyle_listelenir_ve_isaretlenir(tarayici, site):
+    tarayici.git(f"{site}/gizli_onay.html")
+    kutu = bul(tarayici.bak(), "contract-to-hire opportunities")
+    assert kutu["tip"] == "checkbox" and kutu["secili"] is False
+    tarayici.tikla(kutu["no"])
+    assert tarayici.sayfa.is_checked("[name=c2h]")
+    assert bul(tarayici.bak(), "contract-to-hire opportunities")["secili"] is True
+
+
+def test_gizli_radyo_dugmesi_for_etiketiyle_listelenir(tarayici, site):
+    tarayici.git(f"{site}/gizli_onay.html")
+    s = tarayici.bak()
+    az = bul(s, "Less than 30")
+    assert az["tip"] == "radio" and az["secili"] is False and bul(s, "More than 30")["secili"] is True
+    tarayici.tikla(az["no"])
+    assert tarayici.sayfa.is_checked("#r2")
+    assert len([o for o in s["ogeler"] if "More than 30" in o["metin"]]) == 1  # etiket bir kez listelenir
+
+
+def test_basili_tut_dogrulamasi_captcha_sayilir(tarayici, site):
+    tarayici.git(f"{site}/basili_tut.html")
+    assert tarayici.bak()["captcha"] is True
+    assert tarayici.captcha_onayla() is False  # onay kutusu yok: kullanıcıya bırakılır
+
+
+def test_basili_tut_gecen_uzun_kilavuz_captcha_sayilmaz():
+    from sonda.tarayici.sayfa import basili_tut_mu
+    assert basili_tut_mu("İnsan olduğunuzu doğrulamak için Basılı Tutun")
+    assert not basili_tut_mu("Telefonu kapatmak için güç tuşunu basılı tutun. " * 60)
+    assert not basili_tut_mu("Press and hold the button to pair your headphones.")
+
+
+
+def test_golge_domdaki_cerez_penceresi_onaylanir(tarayici, site):
+    """Canlı #201: Teknosa'nın EFILLI-LAYOUT-DYNAMIC çerez penceresi (gölge DOM) her tıklamayı engelliyordu."""
+    tarayici.git(f"{site}/cerez_golge.html")
+    tarayici.tikla(bul(tarayici.bak(), "Devam et")["no"])
+    assert tarayici.sayfa.inner_text("#sonuc") == "Devam edildi"
+
+
+def test_cerezle_ilgisiz_kabul_penceresine_basilmaz(tarayici, site):
+    """Güvenlik: yalnızca çerez/KVKK penceresi onaylanır; üyelik/teklif gibi bir "Kabul et"e kod basmaz."""
+    from sonda.tarayici import TiklamaEngeli
+    tarayici.git(f"{site}/kabul_tuzak.html")
+    with pytest.raises(TiklamaEngeli):
+        tarayici.tikla(bul(tarayici.bak(), "Devam et")["no"])
+    assert tarayici.sayfa.inner_text("#sonuc") == ""
