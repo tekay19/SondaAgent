@@ -1,11 +1,4 @@
-# Sanal ortam ve önbellekler
-.venv/
-__pycache__/
-*.pyc
-
-# Kişisel veriler (hafıza) — asla repoya girmez
-veri/
-
-# Test çıktıları
-tests/sonuc_*.json
-tests/log_*.txt
+node_modules/
+dist/
+.DS_Store
+*.log
