@@ -565,10 +565,11 @@ test('Zip paketi: geçmişte gizli dosya ya da değer varsa git geçmişi pakete
   r = await archive.collect(b.dir, { needles: ['tok_LIVE_abcdef123456'] });
   assert.ok(!r.gitIncluded && /gizli bir değer/.test(r.gitExcluded));
   assert.deepStrictEqual(r.files, ['config.ts']);
-  // (c) uzak depo adresinde jeton
+  // (c) uzak depo adresinde jeton: geçmiş temiz kopyadan gelir, uzak depo kaydı (ve jeton) pakete girmez
   b.g('remote', 'add', 'origin', 'https://user:ghp_x@github.com/x/y.git');
   r = await archive.collect(b.dir, {});
-  assert.ok(/kimlik bilgisi/.test(r.gitExcluded));
+  assert.ok(r.gitIncluded, r.gitExcluded);
+  assert.ok(!fs.readFileSync(path.join(r.gitRoot, '.git', 'config'), 'utf8').includes('ghp_x'));
   // (d) git deposu olmayan klasör: tarama, gizli dosyalar ve bağımlılıklar dışarıda
   const c = tmp();
   fs.mkdirSync(path.join(c, 'node_modules', 'y'), { recursive: true });

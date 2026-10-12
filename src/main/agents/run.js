@@ -11,7 +11,10 @@ const { resolveBin } = require('./install');
 // Vercel, Shopify, Slack…) da kapatılır: --strict-mcp-config yerel yapılandırmayı keser, bu değişken hesap
 // bağlayıcılarını. Otonom bir ajan, tam yetkiyle çalışırken gerçek dünyada işlem yapabilecek araçlara erişmemeli.
 // Claude hesabındaki bağlayıcılar (claude.ai MCP) yalnızca kullanıcı açtıysa ve yalnızca kodlama oturumunda yüklenir.
+// Codex API anahtarıyla giriş yapılmış olabilir (ortam değişkeni): bu anahtarlar yalnızca Codex oturumuna gider.
+const CODEX_AUTH_VARS = ['OPENAI_API_KEY', 'CODEX_API_KEY'];
 function agentRunEnv(agentId, settings = {}, mode = 'code') {
+  if (agentId === 'codex') return agentEnv(Object.fromEntries(CODEX_AUTH_VARS.filter((k) => process.env[k]).map((k) => [k, process.env[k]])));
   return agentEnv(agentId === 'claude' && (!settings.claudeAllowMcp || mode === 'review') ? { ENABLE_CLAUDEAI_MCP_SERVERS: 'false' } : {});
 }
 

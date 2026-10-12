@@ -156,11 +156,10 @@ test('Gizlilik kuralları: ad parçalarına bakılır; yapılandırma değerleri
   ];
   for (const [k, v] of not) assert.strictEqual(E.isSensitive(k, v), false, `${k} gizli sayılmamalı`);
   for (const [k, v] of yes) assert.strictEqual(E.isSensitive(k, v), true, `${k} gizli sayılmalı`);
-  // Commit / zip taraması: kısa değerler ve PEM başlık satırları iğne olmaz.
-  assert.deepStrictEqual(
-    E.needlesOf({ A_KEY: 'short12', B_TOKEN: 'longenough1', PEM_PRIVATE_KEY: '-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0B\nkısa\n-----END PRIVATE KEY-----' }),
-    ['longenough1', 'MIIEvQIBADANBgkqhkiG9w0B']
-  );
+  // Commit / zip taraması: kısa değerler, PEM başlık satırları ve çok satırlı ham hal iğne olmaz.
+  const needles = E.needlesOf({ A_KEY: 'short12', B_TOKEN: 'longenough1', PEM_PRIVATE_KEY: '-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0B\nkısa\n-----END PRIVATE KEY-----' });
+  assert.ok(needles.includes('longenough1') && needles.includes('MIIEvQIBADANBgkqhkiG9w0B'));
+  assert.ok(!needles.includes('short12') && !needles.some((n) => /^-----(BEGIN|END) [A-Z ]+-----$/.test(n) || /\n/.test(n) || n === 'kısa'));
 });
 
 test('Maskeleme: çok satırlı değerin satırları, .env / JSON kaçışlı ve URL kodlu biçimler de yakalanır', () => {

@@ -344,7 +344,8 @@ function isSensitive(name, value) {
 const PEM_MARK = /^-----(BEGIN|END) [A-Z0-9 ]+-----$/;
 
 // Bir gizli değerin metinlerde görülebileceği biçimler: ham hali, çok satırlı değerlerin uzun satırları
-// (satır satır akan loglar), .env / JSON içindeki kaçışlı hali ve URL kodlanmış hali.
+// (satır satır akan loglar), .env / JSON içindeki kaçışlı hali, URL kodlanmış hali ve `$` kaçışlı halleri
+// (dotenv-expand `\$`, docker compose `$$`). Maskeleme, commit taraması ve zip taraması bu tek listeyi kullanır.
 function variantsOf(value) {
   const out = new Set([value]);
   if (/[\r\n]/.test(value)) {
@@ -361,6 +362,10 @@ function variantsOf(value) {
     if (enc !== value) out.add(enc);
   } catch {
     /* geçersiz UTF-16 */
+  }
+  if (value.includes('$')) {
+    out.add(value.replace(/\$/g, '\\$'));
+    out.add(value.replace(/\$/g, '$$$$'));
   }
   return [...out].filter((v) => v.length >= 6);
 }
@@ -380,21 +385,26 @@ function makeRedactor(vars) {
   };
 }
 
-// Commit ve zip taramasında aranacak parçalar (çok satırlı değerlerin uzun satırları dahil).
+// Commit ve zip taramasında aranacak parçalar: maskelemenin biçimleri. Çok satırlı değerin ham hali alınmaz (fark
+// satır satır taranır; uzun satırları zaten listede). 8 karakterden kısa biçimler alınmaz: "secret", "admin1" gibi
+// sözcükler kodda her yerde geçer ve dosyalar yanlış alarmla commit dışında kalırdı.
 function needlesOf(vars) {
   const out = new Set();
   for (const [k, v] of Object.entries(vars || {})) {
     if (!isSensitive(k, v)) continue;
-    if (/[\r\n]/.test(v)) {
-      for (const line of v.split(/\r?\n/)) {
-        const t = line.trim();
-        if (t.length >= 12 && !PEM_MARK.test(t)) out.add(t);
-      }
-    } else if (v.trim().length >= 8) {
-      out.add(v.trim());
+    for (const form of variantsOf(v)) {
+      const t = form.trim();
+      if (t.length >= 8 && !/[\r\n]/.test(t) && !PEM_MARK.test(t)) out.add(t);
     }
   }
   return [...out];
 }
 
-module.exports = { NAME_RE, HEADER, TARGETS, OWN_SECRET, fillLocalEnv, parseEnv, parseExample, serializeValue, representable, upsertEnv, removeFromEnv, findExample, writeEnvFiles, removeFromEnvFiles, basicAuthCreds, isSensitive, makeRedactor, needlesOf, expandsDollar, dialectOf };
+// Sonda'nın .env'ye kendi ürettiği sırlar (bkz. fillLocalEnv): ad OWN_SECRET, değer randomHex biçiminde. Elle
+// yazılmış geliştirme sırları ("dev-secret-change-me") bilerek alınmaz: compose / seed dosyalarında da geçerler.
+const GENERATED = /^(?:[0-9a-f]{32}|[0-9a-f]{64})$/;
+function generatedSecrets(vars) {
+  return Object.fromEntries(Object.entries(vars || {}).filter(([k, v]) => OWN_SECRET.test(k) && GENERATED.test(String(v))));
+}
+
+module.exports = { NAME_RE, HEADER, TARGETS, OWN_SECRET, fillLocalEnv, parseEnv, parseExample, serializeValue, representable, upsertEnv, removeFromEnv, findExample, writeEnvFiles, removeFromEnvFiles, basicAuthCreds, secretName, isSensitive, makeRedactor, needlesOf, generatedSecrets, expandsDollar, dialectOf };

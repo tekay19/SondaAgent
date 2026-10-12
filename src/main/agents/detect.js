@@ -6,7 +6,7 @@ const { agentEnv } = require('../env');
 const { claudeModelOf, claudeModelLabel } = require('../models');
 const { clip, AUTH_ERROR, ADAPTERS } = require('./adapters');
 const { resolveBin, versionOf, semver, cmpVersion, installKind, updateCommand, latestVersion } = require('./install');
-const { jsonFromText } = require('./run');
+const { jsonFromText, agentRunEnv } = require('./run');
 
 const PLAN_LABEL = { max: 'Max', pro: 'Pro', team: 'Team', enterprise: 'Enterprise' };
 
@@ -18,7 +18,7 @@ async function authInfo(id, bin) {
   const out = { loggedIn: null, method: null, plan: null, account: null };
   if (!bin) return out;
   const args = id === 'claude' ? ['auth', 'status'] : ['login', 'status'];
-  const r = await runner.run({ command: bin, args, env: agentEnv(), timeoutMs: 15000, tailSize: 20000 });
+  const r = await runner.run({ command: bin, args, env: agentRunEnv(id), timeoutMs: 15000, tailSize: 20000 });
   const text = `${r.stdout || ''}\n${r.stderr || ''}`;
   if (id === 'claude') {
     const info = jsonFromText(text);

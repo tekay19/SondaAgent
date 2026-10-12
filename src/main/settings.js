@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { DEFAULT_STANDARDS } = require('./prompts');
 const { DEFAULT_CLAUDE_MODEL, CLAUDE_MODELS, claudeModelOf, claudeModelLabel } = require('./models');
-const { writeFileAtomic } = require('./fsx');
+const { writeFileAtomic, readStore } = require('./fsx');
 
 const DEFAULTS = {
   geminiModel: 'gemini-pro-latest',
@@ -94,9 +94,9 @@ function load() {
   if (cache) return cache;
   let raw = {};
   try {
-    raw = JSON.parse(fs.readFileSync(file(), 'utf8'));
+    raw = readStore(file()) || {}; // yoksa ilk açılış; bozuksa kenara alınır (anahtarlar yedek dosyada kalır)
   } catch {
-    /* ilk açılış */
+    /* okunamadı: varsayılanlar */
   }
   cache = { ...DEFAULTS };
   for (const [k, v] of Object.entries(raw && typeof raw === 'object' ? raw : {})) {
@@ -280,4 +280,23 @@ const managerMissingMessage = (s = get()) => (s.managerBy === 'anthropic' ? 'Ant
 // Günlük satırlarında sağlayıcı adını belirlemek için: anahtarı çözmeden yalnızca seçimi okur.
 const managerBy = () => (load().managerBy === 'anthropic' ? 'anthropic' : 'gemini');
 
-module.exports = { get, getPublic, save, managerReady, managerMissingMessage, managerBy };
+/**
+ * Şifreleme yokken düz saklanmış API anahtarlarını şifreler. Uygulama hazır olduktan sonra çağrılır (Windows ve Linux'ta
+ * şifreleme ancak o zaman kullanılabilir). Şifrelenen anahtar sayısı.
+ */
+function migratePlain() {
+  const s = load();
+  if (!safeStorage.isEncryptionAvailable()) return 0;
+  let n = 0;
+  for (const name of ['gemini', 'anthropic']) {
+    const plain = cleanKey(s[`${name}KeyPlain`] || '');
+    if (!plain || s[`${name}KeyEnc`]) continue;
+    s[`${name}KeyEnc`] = safeStorage.encryptString(plain).toString('base64');
+    delete s[`${name}KeyPlain`];
+    n++;
+  }
+  if (n) persist();
+  return n;
+}
+
+module.exports = { get, getPublic, save, migratePlain, managerReady, managerMissingMessage, managerBy };

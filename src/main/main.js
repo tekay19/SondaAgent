@@ -528,6 +528,13 @@ if (primary) {
 
   app.whenReady().then(() => {
     if (process.platform === 'win32') app.setAppUserModelId('com.semih.sonda-agent');
+    // Şifreleme ancak uygulama hazır olunca kullanılabilir (Windows / Linux): o zamana kadar düz saklanmış anahtarlar şifrelenir.
+    try {
+      settings.migratePlain();
+      secrets.migratePlain();
+    } catch (e) {
+      console.error('[sonda] anahtarlar şifrelenemedi:', e.message);
+    }
     applyTheme();
     createWindow();
     app.on('activate', showWindow);

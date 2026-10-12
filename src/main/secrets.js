@@ -7,7 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const envfile = require('./envfile');
 const project = require('./project');
-const { writeFileAtomic } = require('./fsx');
+const { writeFileAtomic, readStore } = require('./fsx');
 
 const MANIFESTS = ['package.json', 'pyproject.toml', 'requirements.txt', 'go.mod', 'Cargo.toml', 'composer.json', 'Gemfile', 'pom.xml', 'build.gradle', 'deno.json'];
 
@@ -17,13 +17,9 @@ const cache = new Map();
 const unreadable = new Set(); // şifresi çözülemeyen kayıtlar (anahtar zinciri erişimi reddedildi vb.)
 let version = 0;
 
+// Bozuk dosya kenara alınır (bkz. fsx.readStore): üzerine yazılıp diğer projelerin değerleri silinmez.
 function readAll() {
-  try {
-    const data = JSON.parse(fs.readFileSync(file(), 'utf8'));
-    return data && typeof data === 'object' ? data : {};
-  } catch {
-    return {};
-  }
+  return readStore(file()) || {};
 }
 
 function writeAll(data) {
@@ -37,9 +33,15 @@ function get(dir) {
   if (!dir) return {};
   const k = keyOf(dir);
   if (!cache.has(k)) {
-    const rec = readAll()[k];
     let vars = {};
+    let rec = null;
     unreadable.delete(k);
+    try {
+      rec = readAll()[k];
+    } catch {
+      // Depo dosyası okunamadı (izin, disk hatası): değerler yok sayılır, kayıt üzerine yazılmaz (bkz. update).
+      unreadable.add(k);
+    }
     if (rec?.enc) {
       try {
         vars = JSON.parse(safeStorage.decryptString(Buffer.from(rec.enc, 'base64')));
@@ -63,7 +65,7 @@ function update(dir, { set = {}, remove = [] } = {}) {
   // Kayıtlı değerler okunamıyorken üzerine yazmak hepsini sessizce silerdi.
   if (unreadable.has(k)) {
     cache.delete(k);
-    throw new Error('Bu projenin kayıtlı değerleri şu anda okunamıyor (işletim sisteminin anahtar zincirine erişilemedi). Uygulamayı yeniden açıp tekrar deneyin; kayıtlı değerler korunuyor.');
+    throw new Error('Bu projenin kayıtlı değerleri şu anda okunamıyor (anahtar deposu dosyası ya da işletim sisteminin anahtar zinciri okunamadı). Uygulamayı yeniden açıp tekrar deneyin; kayıtlı değerler korunuyor.');
   }
   const dirs = appDirs(dir);
   const removed = [];
@@ -82,8 +84,7 @@ function update(dir, { set = {}, remove = [] } = {}) {
   }
   const all = readAll();
   if (!Object.keys(vars).length) delete all[k];
-  else if (encrypted()) all[k] = { enc: safeStorage.encryptString(JSON.stringify(vars)).toString('base64'), updatedAt: Date.now() };
-  else all[k] = { plain: vars, updatedAt: Date.now() };
+  else all[k] = record(vars);
   writeAll(all);
   cache.set(k, vars);
   version++;
@@ -91,6 +92,27 @@ function update(dir, { set = {}, remove = [] } = {}) {
   const gone = removed.filter((n) => !(n in vars));
   if (gone.length) envfile.removeFromEnvFiles(dirs, gone);
   return vars;
+}
+
+// Şifreleme yoksa (anahtar zinciri kullanılamıyor) değerler yalnızca sahibine açık dosyada düz durur; şifreleme
+// kullanılabilir olunca migratePlain onları şifreler.
+function record(vars) {
+  return encrypted() ? { enc: safeStorage.encryptString(JSON.stringify(vars)).toString('base64'), updatedAt: Date.now() } : { plain: vars, updatedAt: Date.now() };
+}
+
+/** Düz saklanmış kayıtları şifreler (uygulama açılışında; şifreleme o an kullanılabiliyorsa). Şifrelenen kayıt sayısı. */
+function migratePlain() {
+  if (!encrypted()) return 0;
+  const all = readAll();
+  let n = 0;
+  for (const [k, rec] of Object.entries(all)) {
+    if (rec?.plain && typeof rec.plain === 'object' && !rec.enc) {
+      all[k] = record(rec.plain);
+      n++;
+    }
+  }
+  if (n) writeAll(all);
+  return n;
 }
 
 function mask(v) {
@@ -182,18 +204,37 @@ function sync(dir) {
 function ensureLocalEnv(dir) {
   if (!dir || !hasManifest(dir)) return null;
   const r = envfile.fillLocalEnv(appDirs(dir), get(dir));
-  if (r && (r.created || r.added.length)) project.ensureGitignore(dir); // .env commit'e girmesin
+  if (r && (r.created || r.added.length)) {
+    project.ensureGitignore(dir); // .env commit'e girmesin
+    version++; // üretilen sırlar maskeleyiciye ve taramaya girsin (bkz. sensitive)
+  }
   return r;
 }
 
-// Gerçekten gizli olan değerler. Projenin .env.example dosyasındaki örnek değerle aynı olan bir değer
-// (ör. yerel geliştirme veritabanı adresi) zaten depoda açıkça durur; gizli sayılmaz.
+// Sonda'nın projenin .env dosyalarına kendi ürettiği sırlar (yönetici parolası, oturum sırrı…).
+function generated(dir) {
+  const out = {};
+  for (const d of appDirs(dir)) {
+    for (const f of envfile.TARGETS) {
+      try {
+        Object.assign(out, envfile.generatedSecrets(envfile.parseEnv(fs.readFileSync(path.join(d, f), 'utf8'))));
+      } catch {
+        /* dosya yok */
+      }
+    }
+  }
+  return out;
+}
+
+// Gerçekten gizli olan değerler: kullanıcının girdikleri ve Sonda'nın ürettikleri. Projenin .env.example dosyasındaki
+// örnek değerle aynı olan bir değer (ör. yerel geliştirme veritabanı adresi) zaten depoda açıkça durur; gizli sayılmaz.
 function sensitive(dir) {
   const examples = new Map(example(dir).vars.map((v) => [v.name, v.example]));
-  return Object.fromEntries(Object.entries(get(dir)).filter(([k, v]) => envfile.isSensitive(k, v) && examples.get(k) !== v));
+  const user = Object.fromEntries(Object.entries(get(dir)).filter(([k, v]) => envfile.isSensitive(k, v) && examples.get(k) !== v));
+  return { ...generated(dir), ...user };
 }
 
 // Commit ve zip taramasında aranacak gizli parçalar (çok satırlı değerlerin uzun satırları dahil).
 const needles = (dir) => envfile.needlesOf(sensitive(dir));
 
-module.exports = { get, update, view, summary, sync, ensureLocalEnv, sensitive, needles, mask, encrypted, version: () => version };
+module.exports = { get, update, view, summary, sync, ensureLocalEnv, sensitive, needles, mask, encrypted, migratePlain, version: () => version };

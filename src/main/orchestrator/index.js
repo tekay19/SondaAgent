@@ -154,6 +154,7 @@ class Orchestrator {
         const note = `Files ${files.join(', ')} contain a literal secret value that belongs in .env. Replace it with the environment variable (e.g. process.env.NAME); never hardcode secrets.`;
         this.job.carryOver = [...new Set([...(this.job.carryOver || []), note])].slice(-30);
       },
+      onScanFail: () => this.log('system', 'warn', 'Gizli değer taraması tamamlanamadı (git hatası ya da zaman aşımı); güvenlik için bu commit atlandı. Değişiklikler çalışma klasöründe duruyor, bir sonraki commit\'e girecek.'),
     });
   }
 

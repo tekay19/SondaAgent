@@ -53,7 +53,9 @@ const REVIEW_TOOLS = 'Read,Grep,Glob,Bash';
 const REVIEW_ALLOWED = [
   'Read', 'Grep', 'Glob',
   // `find` yok: -delete / -exec ile dosya silebilir; dosya aramak için Glob ve Grep araçları var.
-  'Bash(ls:*)', 'Bash(cat:*)', 'Bash(head:*)', 'Bash(tail:*)', 'Bash(wc:*)', 'Bash(grep:*)', 'Bash(rg:*)', 'Bash(tree:*)', 'Bash(pwd)',
+  // `cat` / `head` / `tail` / `grep` / `rg` yok: dosya okumak ve aramak için Read ve Grep araçları var; kabuk komutları
+  // .env okuma yasağını (Read kuralları) atlatırdı.
+  'Bash(ls:*)', 'Bash(wc:*)', 'Bash(tree:*)', 'Bash(pwd)',
   'Bash(git diff:*)', 'Bash(git log:*)', 'Bash(git show:*)', 'Bash(git status:*)', 'Bash(git ls-files:*)',
   'Bash(npm view:*)', 'Bash(npm ls:*)', 'Bash(node --version)', 'Bash(npm --version)', 'Bash(node -v)', 'Bash(npm -v)', 'Bash(pnpm -v)', 'Bash(git --version)',
   // test:unit / test:integration ayrı yazılır: önek eşleşmesi kelime sınırında yapılır ("run test" ≠ "run test:integration").
@@ -74,10 +76,17 @@ const REVIEW_ALLOWED = [
   ...['pip', 'pip3', 'python -m pip', 'python3 -m pip'].map((p) => `Bash(${p} index versions:*)`),
 ];
 
-// Kullanıcının gerçek değerlerini taşıyan .env dosyaları ajan oturumlarına okutulmaz: Read / Edit ve
-// `cat`, `grep` gibi komutlar reddedilir (örnek dosyası .env.example okunabilir). Uygulama ve araçlar
-// dosyayı çalışma anında kendileri okumaya devam eder.
-const ENV_DENY = ['.env', '.env.local', '.env.*.local'].flatMap((f) => [`Read(${f})`, `Read(**/${f})`]);
+// Kullanıcının gerçek değerlerini taşıyan .env dosyaları ajan oturumlarına okutulmaz: Read aracı (Grep / Glob da bu
+// kurala uyar) ve dosyayı doğrudan okuyan yaygın kabuk komutları reddedilir (örnek dosyası .env.example okunabilir).
+// Kabuk kuralları önek eşleşmesidir: `cat .env` ve `cat .env.local` yakalanır; dolaylı okumayı (betik, `grep -r`)
+// tam olarak engellemez — asıl koruma, değerlerin istemlere hiç girmemesi ve loglarda maskelenmesidir.
+// Uygulama ve araçlar dosyayı çalışma anında kendileri okumaya devam eder.
+const ENV_FILES = ['.env', '.env.local', '.env.*.local'];
+const ENV_READERS = ['cat', 'head', 'tail', 'less', 'more', 'bat', 'sed', 'awk', 'grep', 'rg', 'strings', 'xxd', 'od', 'base64', 'cp', 'source'];
+const ENV_DENY = [
+  ...ENV_FILES.flatMap((f) => [`Read(${f})`, `Read(**/${f})`]),
+  ...ENV_READERS.flatMap((c) => ['.env', './.env'].map((f) => `Bash(${c} ${f}:*)`)),
+];
 
 function summarizeToolInput(name, input = {}) {
   if (input.command) return clip(input.command, 300);

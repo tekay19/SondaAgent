@@ -204,32 +204,67 @@ async function stageAll(dir) {
   await git(dir, ['add', '-A', '--', '.', ...ENV_EXCLUDES]);
 }
 
-// Kullanıcının gizli değerlerinden biri (ör. API anahtarı) koda yazılmışsa o dosyaları commit dışında bırakır.
-async function unstageSecrets(dir, needles) {
-  if (!needles?.length) return [];
+// Git'in tırnak içinde ve C kaçışlarıyla yazdığı yol (`"b/ayar \"ğ\".ts"`, `"b/a\tb"`, sekizli baytlar) → düz yol.
+const C_ESCAPES = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13, '"': 34, '\\': 92 };
+function unquoteGitPath(s) {
+  if (!s.startsWith('"') || !s.endsWith('"')) return s;
+  const bytes = [];
+  const body = Buffer.from(s.slice(1, -1), 'utf8');
+  for (let i = 0; i < body.length; i++) {
+    if (body[i] !== 92) {
+      bytes.push(body[i]);
+      continue;
+    }
+    const next = String.fromCharCode(body[i + 1]);
+    if (/[0-7]/.test(next)) {
+      bytes.push(parseInt(body.subarray(i + 1, i + 4).toString(), 8));
+      i += 3;
+    } else {
+      bytes.push(C_ESCAPES[next] ?? body[i + 1]);
+      i += 1;
+    }
+  }
+  return Buffer.from(bytes).toString('utf8');
+}
+
+/**
+ * Kullanıcının gizli değerlerinden biri (ör. API anahtarı) koda yazılmışsa o dosyaları commit dışında bırakır.
+ * Dönen: { ok, leaked }. Tarama tamamlanamazsa (zaman aşımı, git hatası) ok=false: sonuç "temiz" sayılmaz.
+ * Commit'e giren ham içerik taranır (--no-textconv: dönüştürücü bir sürücü değeri gizleyemez).
+ */
+async function unstageSecrets(dir, needles, { timeoutMs = 60000 } = {}) {
+  if (!needles?.length) return { ok: true, leaked: [] };
   const leaked = new Set();
   let file = null;
-  await runner.run({
+  const r = await runner.run({
     command: gitBin(),
-    args: ['-c', 'core.quotePath=false', 'diff', '--cached', '--no-color', '--no-ext-diff', '-U0', '--', '.', ...LOCK_EXCLUDES],
+    args: ['-c', 'core.quotePath=false', 'diff', '--cached', '--no-color', '--no-ext-diff', '--no-textconv', '-U0', '--', '.', ...LOCK_EXCLUDES],
     cwd: dir,
     env: agentEnv({ GIT_TERMINAL_PROMPT: '0' }),
-    timeoutMs: 60000,
+    timeoutMs,
     tailSize: 1000,
     onStdout: (line) => {
-      if (line.startsWith('+++ ')) file = line.slice(4).replace(/^"|"$/g, '').replace(/^b\//, '');
+      // Adında boşluk olan dosyanın başlığına git bir sekme ekler (`+++ b/a b.ts\t`): adın parçası değildir.
+      if (line.startsWith('+++ ')) file = unquoteGitPath(line.slice(4).replace(/\t$/, '')).replace(/^b\//, '');
       else if (file && file !== '/dev/null' && line.startsWith('+') && needles.some((n) => line.includes(n))) leaked.add(file);
     },
   });
+  if (r.timedOut || r.code !== 0) return { ok: false, leaked: [] };
   const list = [...leaked];
   if (list.length) await git(dir, ['reset', '-q', '--', ...list]);
-  return list;
+  return { ok: true, leaked: list };
 }
 
-async function commitAll(dir, message, { secretNeedles, onLeak } = {}) {
+async function commitAll(dir, message, { secretNeedles, onLeak, onScanFail, scanTimeoutMs } = {}) {
   if (!gitBin()) return null;
   await stageAll(dir);
-  const leaked = await unstageSecrets(dir, secretNeedles);
+  const scan = await unstageSecrets(dir, secretNeedles, scanTimeoutMs ? { timeoutMs: scanTimeoutMs } : {});
+  // Tarama bitmediyse gizli bir değer commit'e girebilirdi: commit atılmaz, değişiklikler bir sonraki commit'e kalır.
+  if (!scan.ok) {
+    onScanFail?.();
+    return null;
+  }
+  const leaked = scan.leaked;
   if (leaked.length) onLeak?.(leaked);
   const r = await git(dir, [...(await identityArgs(dir)), 'commit', '-m', message, '--no-verify']);
   if (r.code !== 0) return null;
@@ -421,4 +456,4 @@ async function sourceSnapshot(dir, { priority = [], budget = 450000 } = {}) {
   return fileContents(dir, ordered, budget);
 }
 
-module.exports = { isEmptyDir, describe, fileTree, keyFiles, nodeApp, ensureRepo, ensureGitignore, git, gitBin, commitAll, headCommit, diffSince, changedFiles, fileContents, relatedFiles, sourceSnapshot, isClean, discardChanges, diffPaths, installedVersions };
+module.exports = { isEmptyDir, describe, fileTree, keyFiles, nodeApp, ensureRepo, ensureGitignore, git, gitBin, unquoteGitPath, unstageSecrets, commitAll, headCommit, diffSince, changedFiles, fileContents, relatedFiles, sourceSnapshot, isClean, discardChanges, diffPaths, installedVersions };

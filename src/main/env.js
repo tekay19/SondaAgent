@@ -3,6 +3,7 @@ const { execFileSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { secretName } = require('./envfile');
 
 const IS_WIN = process.platform === 'win32';
 const SEP = IS_WIN ? ';' : ':';
@@ -86,26 +87,49 @@ function findAllExecutables(name) {
 // Kullanıcının bilinçli olarak ayarlamış olabileceği Claude Code değişkenleri korunur.
 const KEEP_CLAUDE_VARS = /^CLAUDE_CODE_(USE_|SKIP_|GIT_BASH_PATH|MAX_OUTPUT_TOKENS|OAUTH_TOKEN$)/;
 
-// Ajanlar için ortam. Sonda başka bir Claude Code oturumunun içinden başlatılmışsa
-// (ör. geliştirme sırasında) o oturumun işaretlerini temizliyoruz ki iç içe oturum sanılmasın.
 // Claude, kullanıcının abonelik girişiyle (claude auth login) çalışır. Ortamda bir Anthropic API anahtarı
 // varsa Claude Code aboneliği bırakıp API faturalı çalışmaya geçer; bu yüzden anahtar ajanlara aktarılmaz.
 const API_BILLING_VARS = new Set(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']);
 
-function agentEnv(extra = {}) {
-  const env = { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', ...extra };
+// Bilgisayardaki gizli değişkenler (GEMINI_API_KEY, OPENAI_API_KEY, GITHUB_TOKEN, AWS_SECRET_ACCESS_KEY…) ajanlara ve
+// projenin komutlarına (ajanın yazdığı testler, kurulum betikleri) aktarılmaz: bir istem enjeksiyonu ya da özensiz bir
+// betik onları dışarı sızdırabilirdi. Ad parçalarına bakılır (bkz. envfile.secretName); jeton/sır sözcüğü adın ortasında
+// da olabilir (AWS_BEARER_TOKEN_BEDROCK).
+const SECRET_PART = /(^|_)(TOKEN|SECRET|SECRETS|PASSWORD|PASSWD|CREDENTIAL|CREDENTIALS|APIKEY)(_|$)/;
+const isSecretVar = (k) => secretName(k) || SECRET_PART.test(k.toUpperCase());
+// Özel npm kayıtlarından paket kurulumu bunları ister (.npmrc'de `${NPM_TOKEN}`).
+const REGISTRY_TOKENS = new Set(['NPM_TOKEN', 'NODE_AUTH_TOKEN', 'YARN_NPM_AUTH_TOKEN', 'BUN_AUTH_TOKEN']);
+// Claude Code bir bulut sağlayıcısı üzerinden çalışıyorsa (CLAUDE_CODE_USE_BEDROCK / _VERTEX / _FOUNDRY) o sağlayıcının
+// kimliğine ihtiyaç duyar; bu durumda yalnızca ajana gider, proje komutlarına gitmez.
+const PROVIDER_VARS = /^(AWS_|GOOGLE_APPLICATION_CREDENTIALS$|CLOUDSDK_|ANTHROPIC_VERTEX_|ANTHROPIC_BEDROCK_|ANTHROPIC_FOUNDRY_|AZURE_)/i;
+const usesCloudProvider = (env) => ['BEDROCK', 'VERTEX', 'FOUNDRY'].some((p) => /^(1|true|yes)$/i.test(env[`CLAUDE_CODE_USE_${p}`] || ''));
+
+// Süreç ortamının temizlenmiş kopyası. `keep(ad)`: gizli adlı olduğu halde kalacak değişkenler.
+// Sonda başka bir Claude Code oturumunun içinden başlatılmışsa (ör. geliştirme sırasında) o oturumun işaretleri de
+// temizlenir ki iç içe oturum sanılmasın.
+function cleanEnv(keep) {
+  const env = { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' };
   for (const k of Object.keys(env)) {
     const sessionMarker =
       k === 'CLAUDECODE' || k === 'CLAUDE_PID' || k === 'CLAUDE_AGENT_SDK_VERSION' ||
       (k.startsWith('CLAUDE_CODE_') && !KEEP_CLAUDE_VARS.test(k));
-    if (sessionMarker || k === 'ELECTRON_RUN_AS_NODE' || API_BILLING_VARS.has(k)) delete env[k];
+    if (sessionMarker || k === 'ELECTRON_RUN_AS_NODE' || API_BILLING_VARS.has(k) || (isSecretVar(k) && !keep(k))) delete env[k];
   }
   return env;
 }
 
-// Doğrulama komutları (build/test) için etkileşimsiz ortam.
+// Ajanlar (Claude Code, Codex) ve git için ortam. `extra` temizlikten sonra eklenir.
+function agentEnv(extra = {}) {
+  const cloud = usesCloudProvider(process.env);
+  const env = cleanEnv((k) => REGISTRY_TOKENS.has(k) || KEEP_CLAUDE_VARS.test(k) || (cloud && PROVIDER_VARS.test(k)));
+  return { ...env, ...extra };
+}
+
+// Doğrulama komutları (kurulum, build, test, dev sunucusu) için etkileşimsiz ortam: projenin kendi kodu çalışır, ajanın
+// oturum jetonu ve bulut kimlikleri de gitmez. Uygulamanın gizli değerleri .env dosyasından okunur.
 function verifyEnv(extra = {}) {
-  return agentEnv({ CI: 'true', NEXT_TELEMETRY_DISABLED: '1', BROWSER: 'none', ...extra });
+  const env = cleanEnv((k) => REGISTRY_TOKENS.has(k));
+  return { ...env, CI: 'true', NEXT_TELEMETRY_DISABLED: '1', BROWSER: 'none', ...extra };
 }
 
 module.exports = { IS_WIN, fixPath, findExecutable, findAllExecutables, agentEnv, verifyEnv };

@@ -14,12 +14,15 @@ const SKIP_DIRS = new Set(['node_modules', '.next', '.nuxt', '.svelte-kit', '.tu
 const ENV_EXAMPLE = /^\.env\.(example|sample|template|dist)$/i;
 const isSecretFile = (name) =>
   (/^\.env([._-].*)?$/i.test(name) && !ENV_EXAMPLE.test(name))
-  || /^\.(envrc|npmrc|netrc|pypirc)$/i.test(name)
-  || /\.(pem|key|p12|pfx|jks|keystore|tfstate|tfvars)$/i.test(name)
+  || /^\.(envrc|npmrc|netrc|pypirc|git-credentials)$/i.test(name)
+  || /^credentials$/i.test(name) // AWS
+  || /\.(pem|key|p8|p12|pfx|jks|keystore|tfstate|tfvars)$/i.test(name)
   || /^id_(rsa|dsa|ecdsa|ed25519)$/i.test(name)
-  || /^(secrets|service-account|credentials)(\.[\w-]+)?\.json$/i.test(name);
-// İşletim sistemi ve araç artıkları.
-const isJunk = (name) => name === '.DS_Store' || name === 'Thumbs.db' || name.endsWith('.tsbuildinfo') || name.endsWith('.log');
+  || /^(secrets|service-account|credentials)(\.[\w-]+)?\.json$/i.test(name)
+  || /firebase-adminsdk.*\.json$/i.test(name);
+// İşletim sistemi ve araç artıkları; yerel veritabanları (kullanıcı verisi taşıyabilir, migrate / seed ile geri gelir).
+const isJunk = (name) => name === '.DS_Store' || name === 'Thumbs.db' || name.endsWith('.tsbuildinfo') || name.endsWith('.log')
+  || /\.(sqlite3?|db)(-journal|-wal|-shm)?$/i.test(name);
 
 const safeName = (s) => String(s || 'proje').replace(/[^\p{L}\p{N}._-]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'proje';
 const gitBin = () => findExecutable('git');
@@ -68,7 +71,10 @@ async function gitFiles(root, signal) {
   return [...new Set(out)];
 }
 
-/** .git klasörünün dosyaları (geçmişi pakete katmak için aynen alınır). */
+/**
+ * .git klasörünün dosyaları ve boş klasörleri. Boş klasörler de girer: dallar `packed-refs` içindeyken `refs/heads`
+ * boştur, ama git klasörü depo saymak için `refs` ister.
+ */
 function gitDirFiles(root) {
   const files = [];
   const walk = (dir, rel) => {
@@ -78,6 +84,7 @@ function gitDirFiles(root) {
     } catch {
       return;
     }
+    if (!entries.length) files.push(rel);
     for (const e of entries) {
       const r = `${rel}/${e.name}`;
       if (e.isSymbolicLink()) continue;
@@ -90,65 +97,111 @@ function gitDirFiles(root) {
 }
 
 /**
- * Git geçmişi pakete girebilir mi? Girmemesi gereken durumlar: uzak depo adresinde kimlik bilgisi,
- * geçmişte commit'lenmiş gizli dosya (.env vb.) ya da geçmişte kullanıcının gizli bir değeri.
- * Dönen: null (temiz) ya da kullanıcıya gösterilecek neden.
+ * Pakete girecek git geçmişi. Kullanıcının .git klasörü olduğu gibi kopyalanmaz: reflog'da kalan (amend / reset ile
+ * değiştirilmiş) commit'ler ve sahipsiz nesneler (sahnelenip geri alınmış dosyalar, ör. Sonda'nın commit taramasının
+ * dışarıda bıraktıkları) eski gizli değerleri taşır. Bunun yerine geçici bir klasöre yalnızca dalların ve etiketlerin
+ * ulaştığı nesnelerle temiz bir kopya alınır ve tarama bu kopyada yapılır: taranan = pakete giren. Uzak depo adresleri
+ * (kimlik bilgisi taşıyabilir) ve yerel klasör yolu kopyaya girmez.
+ * Dönen: { gitRoot } (kopyanın üst klasörü; `.git` onun içinde) ya da { problem } (kullanıcıya gösterilecek neden).
+ * Kopya alınamaz ya da taranamazsa geçmiş pakete girmez.
  */
-async function historyProblem(root, needles, signal) {
+async function cleanHistory(root, needles, signal) {
+  if ((await git(root, ['rev-parse', '--verify', '-q', 'HEAD'], { signal })).code !== 0) return { problem: 'depoda henüz commit yok' };
+  const gitRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'sonda-zip-git-'));
+  const gitDir = path.join(gitRoot, '.git');
+  const fail = (problem) => {
+    removeDir(gitRoot);
+    return { problem };
+  };
+  const inClone = (args, extra = {}) => git(gitRoot, ['--git-dir', gitDir, ...args], { signal, ...extra });
   try {
-    const cfg = fs.readFileSync(path.join(root, '.git', 'config'), 'utf8');
-    if (/:\/\/[^/\s@]+@/.test(cfg)) return 'uzak depo adresinde kimlik bilgisi var';
-  } catch {
-    return 'git yapılandırması okunamadı';
+    // --no-local: yerel kopyalama kısayolu yerine git aktarımı; yalnızca referansların ulaştığı nesneler paketlenir.
+    if ((await git(root, ['clone', '--quiet', '--bare', '--no-local', '--', root, gitDir], { signal, timeoutMs: 10 * 60000 })).code !== 0) {
+      return fail('geçmiş kopyalanamadı');
+    }
+    const remotes = await inClone(['remote']);
+    if (remotes.code !== 0) return fail('geçmiş kopyalanamadı');
+    // Açılan paket normal bir çalışma deposu olsun: çıplak değil, uzak depo kaydı yok, dizini (index) HEAD'e göre kurulu.
+    const setup = [['config', 'core.bare', 'false'], ...remotes.stdout.split('\n').filter(Boolean).map((r) => ['remote', 'remove', r.trim()]), ['read-tree', 'HEAD']];
+    for (const args of setup) if ((await inClone(args)).code !== 0) return fail('geçmiş kopyalanamadı');
+    let secretFile = null;
+    const names = await inClone(['-c', 'core.quotePath=false', 'log', '--all', '--diff-merges=first-parent', '--pretty=format:', '--name-only'], {
+      onStdout: (line) => {
+        if (!secretFile && line && isSecretFile(path.posix.basename(line.trim()))) secretFile = line.trim();
+      },
+    });
+    if (secretFile) return fail(`geçmişte gizli dosya commit'lenmiş (${secretFile})`);
+    if (names.code !== 0) return fail('geçmiş taranamadı');
+    if (!needles?.length) return { gitRoot };
+    let leaked = false;
+    const scan = runner.start({
+      command: gitBin(),
+      args: ['--git-dir', gitDir, 'log', '--all', '--diff-merges=first-parent', '-p', '--no-color', '--no-ext-diff', '--no-textconv', '-U0'],
+      cwd: gitRoot,
+      env: agentEnv({ GIT_TERMINAL_PROMPT: '0' }),
+      signal,
+      timeoutMs: 90000,
+      tailSize: 1000,
+      onStdout: (line) => {
+        if (leaked || line[0] !== '+') return;
+        if (needles.some((n) => line.includes(n))) {
+          leaked = true;
+          scan.kill();
+        }
+      },
+    });
+    const res = await scan.done;
+    if (leaked) return fail('geçmişte gizli bir değer commit\'lenmiş');
+    if (res.timedOut) return fail('geçmiş taranamadı (çok büyük)');
+    if (res.code !== 0) return fail('geçmiş taranamadı');
+    return { gitRoot };
+  } catch (err) {
+    removeDir(gitRoot);
+    throw err;
   }
-  let secretFile = null;
-  const names = await git(root, ['-c', 'core.quotePath=false', 'log', '--all', '--pretty=format:', '--name-only'], {
-    signal,
-    onStdout: (line) => {
-      if (!secretFile && line && isSecretFile(path.posix.basename(line.trim()))) secretFile = line.trim();
-    },
-  });
-  // Henüz commit yoksa (boş depo) `git log` hata verir: geçmiş yok, sorun da yok.
-  if (secretFile) return `geçmişte gizli dosya commit'lenmiş (${secretFile})`;
-  if (names.code !== 0 || !needles?.length) return null;
-  let leaked = false;
-  const scan = runner.start({
-    command: gitBin(),
-    args: ['log', '--all', '-p', '--no-color', '--no-ext-diff', '-U0'],
-    cwd: root,
-    env: agentEnv({ GIT_TERMINAL_PROMPT: '0' }),
-    signal,
-    timeoutMs: 90000,
-    tailSize: 1000,
-    onStdout: (line) => {
-      if (leaked || line[0] !== '+') return;
-      if (needles.some((n) => line.includes(n))) {
-        leaked = true;
-        scan.kill();
-      }
-    },
-  });
-  const res = await scan.done;
-  if (leaked) return 'geçmişte gizli bir değer commit\'lenmiş';
-  if (res.timedOut) return 'geçmiş taranamadı (çok büyük)';
-  return null;
 }
 
-// Dosyanın içinde kullanıcının gizli değerlerinden biri geçiyor mu? (İkili ve çok büyük dosyalar taranmaz.)
-function containsNeedle(file, needles) {
-  if (!needles?.length) return false;
+function removeDir(dir) {
   try {
-    if (fs.statSync(file).size > 5 * 1024 * 1024) return false;
-    const text = fs.readFileSync(file, 'utf8');
-    return needles.some((n) => text.includes(n));
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
+  } catch {
+    /* geçici klasör: işletim sistemi temizler */
+  }
+}
+
+// Dosyanın içinde kullanıcının gizli değerlerinden biri (herhangi bir biçimiyle) geçiyor mu? Dosya parça parça okunur:
+// boyut sınırı yok ve parça sınırına denk gelen değer de bulunur (her parçaya bir öncekinin sonu eklenir).
+const CHUNK = 1024 * 1024;
+async function containsNeedle(file, needles) {
+  if (!needles?.length) return false;
+  const bufs = needles.map((n) => Buffer.from(n, 'utf8'));
+  const overlap = Math.max(...bufs.map((b) => b.length)) - 1;
+  const buf = Buffer.alloc(CHUNK + overlap);
+  let fh;
+  try {
+    fh = await fs.promises.open(file, 'r');
+    let carry = 0;
+    for (;;) {
+      const { bytesRead } = await fh.read(buf, carry, CHUNK, null);
+      if (!bytesRead) return false;
+      const filled = carry + bytesRead;
+      const view = buf.subarray(0, filled);
+      if (bufs.some((b) => view.includes(b))) return true;
+      carry = Math.min(overlap, filled);
+      buf.copy(buf, 0, filled - carry, filled);
+    }
   } catch {
     return false;
+  } finally {
+    await fh?.close();
   }
 }
 
 /**
- * Pakete girecek dosyalar (proje köküne göre göreli yollar) ve dışarıda bırakılanların dökümü.
- * needles: kullanıcının gizli değerleri — içinde geçen dosyalar pakete girmez.
+ * Pakete girecek dosyalar ve dışarıda bırakılanların dökümü. `files`: proje köküne göre göreli yollar; geçmiş girerse
+ * sonlarında `.git/…` yolları (bunlar `gitRoot` klasörüne göredir — temiz kopya, bkz. cleanHistory). `gitRoot` geçici
+ * klasördür: zipProject işi bitince siler.
+ * needles: kullanıcının gizli değerleri (tüm biçimleriyle) — içinde geçen dosyalar pakete girmez.
  */
 async function collect(root, { includeGit = true, needles = [], signal } = {}) {
   const tracked = await gitFiles(root, signal);
@@ -171,18 +224,23 @@ async function collect(root, { includeGit = true, needles = [], signal } = {}) {
       continue;
     }
     if (isJunk(name)) continue;
-    if (containsNeedle(full, needles)) {
+    if (await containsNeedle(full, needles)) {
       leaked.push(rel);
       continue;
     }
     files.push(rel);
   }
   let gitExcluded = null;
+  let gitRoot = null;
   if (includeGit && tracked) {
-    gitExcluded = await historyProblem(root, needles, signal);
-    if (!gitExcluded) files.push(...gitDirFiles(root));
+    const h = await cleanHistory(root, needles, signal);
+    if (h.problem) gitExcluded = h.problem;
+    else {
+      gitRoot = h.gitRoot;
+      files.push(...gitDirFiles(gitRoot));
+    }
   }
-  return { files, skippedSecrets, leaked, gitIncluded: !!(includeGit && tracked && !gitExcluded), gitExcluded };
+  return { files, skippedSecrets, leaked, gitIncluded: !!gitRoot, gitExcluded, gitRoot };
 }
 
 /**
@@ -197,34 +255,48 @@ async function zipProject(projectDir, { outDir, name, target: targetPath, includ
   const target = targetPath ? path.resolve(targetPath) : path.join(outDir || path.dirname(root), `${base}-${stamp}.zip`);
   if (target.startsWith(root + path.sep)) throw new Error('Zip dosyası projenin kendi klasörüne kaydedilemez; başka bir yer seçin.');
   const found = await collect(root, { includeGit, needles, signal });
-  if (!found.files.length) throw new Error('Paketlenecek dosya bulunamadı.');
   try {
-    fs.unlinkSync(target);
-  } catch {
-    /* yoktu */
-  }
-
-  let r;
-  if (IS_WIN) {
-    // Windows 10+ ile gelen bsdtar: -a uzantıya göre zip üretir, -T dosya listesini okur; yollar korunur.
-    const listFile = path.join(os.tmpdir(), `sonda-zip-${process.pid}-${Date.now()}.txt`);
-    fs.writeFileSync(listFile, found.files.join('\n'), 'utf8');
-    const tar = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe');
-    r = await runner.run({ command: fs.existsSync(tar) ? tar : 'tar.exe', args: ['-a', '-c', '-f', target, '-C', root, '-T', listFile], cwd: root, signal, timeoutMs: 20 * 60 * 1000, tailSize: 4000 });
+    if (!found.files.length) throw new Error('Paketlenecek dosya bulunamadı.');
     try {
-      fs.unlinkSync(listFile);
+      fs.unlinkSync(target);
     } catch {
-      /* geçici */
+      /* yoktu */
     }
-  } else {
-    const zipBin = findExecutable('zip');
-    if (!zipBin) throw new Error('`zip` komutu bulunamadı.');
-    // Dosya adları stdin'den (-@): boşluk/özel karakterler güvenli, komut satırı uzunluk sınırı yok.
-    r = await runner.run({ command: zipBin, args: ['-q', '-X', '-@', target], cwd: root, input: found.files.join('\n'), signal, timeoutMs: 20 * 60 * 1000, tailSize: 4000 });
+    // Proje dosyaları proje klasöründen, geçmiş (`.git/…`) temiz kopyanın klasöründen (bkz. cleanHistory) alınır.
+    const own = found.files.filter((f) => !f.startsWith('.git/'));
+    const history = found.gitRoot ? found.files.filter((f) => f.startsWith('.git/')) : [];
+    const opts = { signal, timeoutMs: 20 * 60 * 1000, tailSize: 4000 };
+    let r;
+    if (IS_WIN) {
+      // Windows 10+ ile gelen bsdtar: -a uzantıya göre zip üretir, -T dosya listesini okur; yollar korunur. Listede tek
+      // başına "-C" satırı, sonraki satırdaki klasöre geçer (geçmiş başka klasörden gelir).
+      const listFile = path.join(os.tmpdir(), `sonda-zip-${process.pid}-${Date.now()}.txt`);
+      const list = [...own.filter((f) => f !== '-C'), ...(history.length ? ['-C', found.gitRoot, ...history] : [])];
+      fs.writeFileSync(listFile, list.join('\n'), 'utf8');
+      const tar = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe');
+      try {
+        r = await runner.run({ command: fs.existsSync(tar) ? tar : 'tar.exe', args: ['-a', '-c', '-f', target, '-C', root, '-T', listFile], cwd: root, ...opts });
+      } finally {
+        try {
+          fs.unlinkSync(listFile);
+        } catch {
+          /* geçici */
+        }
+      }
+    } else {
+      const zipBin = findExecutable('zip');
+      if (!zipBin) throw new Error('`zip` komutu bulunamadı.');
+      // Dosya adları stdin'den (-@): boşluk/özel karakterler güvenli, komut satırı uzunluk sınırı yok. İkinci çağrı
+      // geçmişi aynı arşive ekler.
+      r = await runner.run({ command: zipBin, args: ['-q', '-X', '-@', target], cwd: root, input: own.join('\n'), ...opts });
+      if (r.code === 0 && history.length) r = await runner.run({ command: zipBin, args: ['-q', '-X', '-@', target], cwd: found.gitRoot, input: history.join('\n'), ...opts });
+    }
+    if (r.code !== 0) throw new Error(`Zip oluşturulamadı: ${(r.stderr || r.stdout || r.error || '').slice(-500)}`);
+    const size = fs.statSync(target).size;
+    return { file: target, size, count: found.files.length, skippedSecrets: found.skippedSecrets, leaked: found.leaked, gitIncluded: found.gitIncluded, gitExcluded: found.gitExcluded };
+  } finally {
+    if (found.gitRoot) removeDir(found.gitRoot);
   }
-  if (r.code !== 0) throw new Error(`Zip oluşturulamadı: ${(r.stderr || r.stdout || r.error || '').slice(-500)}`);
-  const size = fs.statSync(target).size;
-  return { file: target, size, count: found.files.length, skippedSecrets: found.skippedSecrets, leaked: found.leaked, gitIncluded: found.gitIncluded, gitExcluded: found.gitExcluded };
 }
 
 module.exports = { zipProject, collect, safeName };
