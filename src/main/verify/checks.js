@@ -124,10 +124,20 @@ async function dependencyAudit(dir, signal) {
   const app = project.nodeApp(dir);
   if (!app || !['npm', 'pnpm'].includes(app.pm)) return null;
   const cmd = app.pm === 'npm' ? 'npm audit --omit=dev --json' : `${pmBin('pnpm')} audit --prod --json`;
-  const r = await runner.run({ shellCommand: cmd, cwd: app.appDir, env: verifyEnv(), timeoutMs: 120000, signal, tailSize: 400000 });
+  // JSON çıktının tamamı toplanır: büyük projelerde başı kesilmiş bir kuyruk ayrıştırılamaz ve denetim sessizce atlanırdı.
+  const lines = [];
+  let size = 0;
+  await runner.run({
+    shellCommand: cmd, cwd: app.appDir, env: verifyEnv(), timeoutMs: 120000, signal, tailSize: 4000,
+    onStdout: (l) => {
+      if (size > 32 * 1024 * 1024) return;
+      lines.push(l);
+      size += l.length + 1;
+    },
+  });
   let data;
   try {
-    data = JSON.parse(r.stdout.trim().replace(/^[^{]*/, ''));
+    data = JSON.parse(lines.join('\n').trim().replace(/^[^{]*/, ''));
   } catch {
     return null;
   }

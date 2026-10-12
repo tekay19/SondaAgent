@@ -8,21 +8,46 @@ const { IS_WIN } = require('./env');
 const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07/g;
 const stripAnsi = (s) => s.replace(ANSI, '');
 
-function lineSplitter(onLine) {
-  let buf = '';
+/**
+ * Akışı satırlara böler. Satır sonu gelmemiş parçalar birleştirilmeden biriktirilir: her parçada baştan arama yapılmaz,
+ * dev bir satır (ör. büyük bir araç sonucu taşıyan stream-json satırı) zamanı katlamaz. `maxLine`'ı aşan satır kesilir;
+ * kalanı ayrı bir satır gibi görünmesin diye bir sonraki satır sonuna kadar atlanır.
+ */
+function lineSplitter(onLine, maxLine = 32 * 1024 * 1024) {
+  let parts = [];
+  let size = 0;
+  let skipping = false;
+  const reset = () => {
+    parts = [];
+    size = 0;
+  };
   return {
     push(chunk) {
-      buf += chunk;
+      let pos = 0;
       let i;
-      while ((i = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, i).replace(/\r$/, '');
-        buf = buf.slice(i + 1);
-        onLine(line);
+      while ((i = chunk.indexOf('\n', pos)) >= 0) {
+        if (skipping) skipping = false;
+        else {
+          parts.push(chunk.slice(pos, i));
+          onLine(parts.join('').replace(/\r$/, ''));
+        }
+        reset();
+        pos = i + 1;
+      }
+      if (skipping || pos >= chunk.length) return;
+      const rest = chunk.slice(pos);
+      parts.push(rest);
+      size += rest.length;
+      if (size > maxLine) {
+        onLine(parts.join('').slice(0, maxLine));
+        reset();
+        skipping = true;
       }
     },
     flush() {
-      if (buf) onLine(buf.replace(/\r$/, ''));
-      buf = '';
+      if (!skipping && size) onLine(parts.join('').replace(/\r$/, ''));
+      reset();
+      skipping = false;
     },
   };
 }
@@ -41,12 +66,17 @@ class Tail {
   }
 }
 
+// Kapanmamış süreçler: uygulama kapanırken hepsi sonlandırılır (bkz. terminateAll).
+const live = new Set();
+
 /**
  * Bir süreci başlatır. Dönen nesne: { child, done: Promise<result>, kill() }
  * - command + args: doğrudan çalıştırma (cross-spawn)
  * - shellCommand: kabuk üzerinden çalıştırma (npm run build gibi)
+ * - exitGraceMs: ana süreç çıktıktan sonra, çıktı borularını tutan arka plan süreçleri (`cmd &`) için bekleme; sonra
+ *   süreç grubu kapatılır. Aksi halde arka planda kalan bir dev sunucusu beklemeyi sonsuza uzatırdı.
  */
-function start({ command, args = [], shellCommand, cwd, env, input, onStdout, onStderr, timeoutMs, signal, tailSize = 8000 }) {
+function start({ command, args = [], shellCommand, cwd, env, input, onStdout, onStderr, timeoutMs, signal, tailSize = 8000, exitGraceMs = 10000 }) {
   const opts = { cwd, env, windowsHide: true, detached: !IS_WIN };
   const child = shellCommand
     ? spawn(shellCommand, { ...opts, shell: true })
@@ -77,10 +107,19 @@ function start({ command, args = [], shellCommand, cwd, env, input, onStdout, on
 
   let timedOut = false;
   let killed = false;
-  // Süreç kendi grubunun lideridir (detached): grup sinyali EŞZAMANLI gider, böylece uygulama kapanırken bile
-  // ajan ve başlattığı komutlar geride kalmaz. tree-kill ayrıca kendi grubunu kurmuş torunları toplar.
+  let closed = false;
+  const timers = new Set();
+  const later = (ms, fn) => {
+    const t = setTimeout(() => {
+      timers.delete(t);
+      fn();
+    }, ms);
+    timers.add(t);
+  };
+  // Süreç kendi grubunun lideridir (detached): grup sinyali EŞZAMANLI gider ve lider çıkmış olsa da gruptaki torunlara
+  // ulaşır. tree-kill ayrıca kendi grubunu kurmuş torunları toplar.
   const signalAll = (sig) => {
-    if (!child.pid) return;
+    if (!child.pid || closed) return;
     if (!IS_WIN) {
       try {
         process.kill(-child.pid, sig);
@@ -90,31 +129,55 @@ function start({ command, args = [], shellCommand, cwd, env, input, onStdout, on
     }
     treeKill(child.pid, sig, () => {});
   };
+  // Grubundan kopmuş (setsid) bir torun boruyu hâlâ tutuyorsa bekleme sonsuza kadar sürmesin: borular kapatılır.
+  const forceClose = () => {
+    if (closed) return;
+    child.stdout?.destroy();
+    child.stderr?.destroy();
+  };
+  const escalate = (afterMs) =>
+    later(afterMs, () => {
+      if (closed) return;
+      signalAll('SIGKILL');
+      later(2000, forceClose);
+    });
   const kill = () => {
-    if (killed || child.exitCode != null) return;
+    if (killed || closed) return;
     killed = true;
     signalAll('SIGTERM');
-    // Kapanmayı reddeden süreçler için yedek.
-    setTimeout(() => {
-      if (child.exitCode == null) signalAll('SIGKILL');
-    }, 4000).unref();
+    escalate(4000); // kapanmayı reddeden süreçler için yedek
   };
-  const timer = timeoutMs
-    ? setTimeout(() => {
-        timedOut = true;
-        kill();
-      }, timeoutMs)
-    : null;
+  if (timeoutMs) {
+    later(timeoutMs, () => {
+      timedOut = true;
+      kill();
+    });
+  }
   const onAbort = () => kill();
   signal?.addEventListener('abort', onAbort, { once: true });
+  if (signal?.aborted) kill();
+  child.on('exit', () => {
+    if (closed || killed) return;
+    // Ana süreç bitti ama borular açık: arka planda kalan bir süreç onları tutuyor.
+    later(exitGraceMs, () => {
+      if (closed) return;
+      signalAll('SIGTERM');
+      escalate(1000);
+    });
+  });
 
-  const done = new Promise((resolve) => {
+  const handle = { child, kill, forceKill: () => signalAll('SIGKILL') };
+  live.add(handle);
+  handle.done = new Promise((resolve) => {
     let spawnError = null;
     child.on('error', (e) => {
       spawnError = e;
     });
     child.on('close', (code, sig) => {
-      if (timer) clearTimeout(timer);
+      closed = true;
+      live.delete(handle);
+      for (const t of timers) clearTimeout(t);
+      timers.clear();
       signal?.removeEventListener('abort', onAbort);
       out.flush();
       err.flush();
@@ -129,12 +192,25 @@ function start({ command, args = [], shellCommand, cwd, env, input, onStdout, on
       });
     });
   });
-
-  return { child, done, kill };
+  return handle;
 }
 
 function run(opts) {
   return start(opts).done;
 }
 
-module.exports = { start, run };
+/**
+ * Uygulama kapanırken: tüm süreçlere SIGTERM, en fazla `graceMs` beklenir, kalan süreç grupları SIGKILL ile kapatılır.
+ * (Normal kill'in SIGKILL yedeği bir zamanlayıcıdır; uygulama o zamana kadar çoktan kapanmış olurdu.)
+ */
+async function terminateAll(graceMs = 2000) {
+  const procs = [...live];
+  if (!procs.length) return;
+  for (const p of procs) p.kill();
+  let timer;
+  await Promise.race([Promise.all(procs.map((p) => p.done)), new Promise((r) => (timer = setTimeout(r, graceMs)))]);
+  clearTimeout(timer);
+  for (const p of live) p.forceKill();
+}
+
+module.exports = { start, run, terminateAll, lineSplitter };

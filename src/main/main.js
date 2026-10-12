@@ -56,6 +56,7 @@ const NOTIFY = {
 
 let win = null;
 let quitting = false;
+let processesStopped = false; // çıkışta süreçler kapatıldı (bkz. before-quit)
 let sleepBlocker = null;
 
 function send(evt) {
@@ -552,10 +553,18 @@ if (primary) {
       return;
     }
     quitting = true;
-    // Çalışan ajan / dev sunucusu süreçlerini geride bırakma (süreç grupları eşzamanlı sonlandırılır); işi
-    // "durduruldu" olarak hemen kaydet ki bir sonraki açılışta "Sürdür" ile kaldığı yerden devam edilebilsin.
+    if (processesStopped) return;
+    // Çalışan ajan / dev sunucusu süreçlerini geride bırakma; işi "durduruldu" olarak hemen kaydet ki bir sonraki
+    // açılışta "Sürdür" ile kaldığı yerden devam edilebilsin. Çıkış, süreçler kapanana kadar (en fazla 2 sn) bekletilir;
+    // SIGTERM'i yok sayanlar sonra SIGKILL ile kapatılır.
+    e.preventDefault();
     for (const o of pool.values()) o.interrupt();
     devServer?.proc.kill();
     jobs.flushAll();
+    runner.terminateAll(2000).finally(() => {
+      processesStopped = true;
+      jobs.flushAll();
+      app.quit();
+    });
   });
 }

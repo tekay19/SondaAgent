@@ -31,6 +31,22 @@ function realDir(dir) {
 
 const inside = (p, dir) => p === dir || p.startsWith(dir + path.sep);
 
+/**
+ * Windows: süreç komut satırında proje klasörü geçiyor mu? Büyük/küçük harf ve eğik çizgi yönü önemsizdir; klasör adı
+ * sınırda bitmelidir (`C:\proj` için `C:\proj-old\…` sayılmaz).
+ */
+function commandLineInside(commandLine, root) {
+  const norm = (s) => String(s || '').replace(/\//g, '\\').toLowerCase();
+  const cmd = norm(commandLine);
+  const dir = norm(root).replace(/\\+$/, '');
+  if (!cmd || !dir) return false;
+  for (let i = cmd.indexOf(dir); i >= 0; i = cmd.indexOf(dir, i + 1)) {
+    const next = cmd[i + dir.length];
+    if (next === undefined || /[\\"' ]/.test(next)) return true;
+  }
+  return false;
+}
+
 // Çalışan tüm süreçler: Map(pid → { ppid, name })
 async function processTable() {
   const table = new Map();
@@ -55,11 +71,12 @@ async function projectProcesses(dir) {
   const root = realDir(dir);
   const out = [];
   if (IS_WIN) {
-    const ps = `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine.Contains('${root.replace(/'/g, "''")}') } | ForEach-Object { "$($_.ProcessId)\`t$($_.Name)" }`;
+    // Eşleşme burada (commandLineInside) yapılır: PowerShell'in Contains'i harfe duyarlıdır ve klasör sınırına bakmaz.
+    const ps = 'Get-CimInstance Win32_Process | Where-Object { $_.CommandLine } | ForEach-Object { "$($_.ProcessId)`t$($_.Name)`t$($_.CommandLine)" }';
     const text = await run('powershell.exe', ['-NoProfile', '-Command', ps]);
     for (const line of text.split(/\r?\n/)) {
-      const [pid, name] = line.trim().split('\t');
-      if (pid && name && DEV_TOOL.test(name)) out.push({ pid: Number(pid), name });
+      const [pid, name, ...cmd] = line.trim().split('\t');
+      if (pid && name && DEV_TOOL.test(name) && commandLineInside(cmd.join('\t'), root)) out.push({ pid: Number(pid), name });
     }
   } else {
     // lsof -F: p<pid> / c<komut> / n<yol> satırları.
@@ -114,4 +131,4 @@ async function killOrphans(dir, { keep = [] } = {}) {
   return procs;
 }
 
-module.exports = { projectProcesses, orphansOf, killOrphans };
+module.exports = { projectProcesses, orphansOf, killOrphans, commandLineInside };

@@ -20,6 +20,21 @@ function freePort() {
   });
 }
 
+const URL_RE = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]):(\d+)/;
+
+/**
+ * Dev sunucusu çıktısındaki bir satırdan uygulamanın adresi. Port Sonda'nın verdiğiyse yalnızca o porttaki adres alınır:
+ * çıktıda geçen bir proxy, API ya da yardımcı servis adresi yanlışlıkla test edilmesin.
+ */
+function detectUrl(line, port) {
+  const m = String(line || '').match(URL_RE);
+  if (!m || (port && Number(m[1]) !== Number(port))) return null;
+  return m[0].replace('0.0.0.0', 'localhost').replace('[::1]', 'localhost');
+}
+
+// Adres herhangi bir HTTP yanıtı veriyor mu (yönlendirme ve hata kodları da yanıttır)?
+const responds = (url) => fetch(url, { signal: AbortSignal.timeout(1500), redirect: 'manual' }).then(() => true, () => false);
+
 async function waitHttp(url, timeoutMs, signal) {
   const alt = url.replace('//localhost', '//127.0.0.1');
   const end = Date.now() + timeoutMs;
@@ -229,12 +244,8 @@ async function startDevServer({ dir, command, url: fixedUrl, signal, log = () =>
   log({ lvl: 'tool', text: `$ ${cmd}${port ? `  (PORT=${port})` : ''}` });
 
   let detected = null;
-  const urlRe = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]):\d+/;
   const onLine = (l) => {
-    if (!detected) {
-      const m = l.match(urlRe);
-      if (m) detected = m[0].replace('0.0.0.0', 'localhost').replace('[::1]', 'localhost');
-    }
+    if (!detected) detected = detectUrl(l, port);
   };
   const proc = runner.start({ shellCommand: cmd, cwd, env: verifyEnv(port ? { PORT: String(port) } : {}), signal, onStdout: onLine, onStderr: onLine, tailSize: 5000 });
   let exited = null;
@@ -248,7 +259,15 @@ async function startDevServer({ dir, command, url: fixedUrl, signal, log = () =>
   };
 
   const t0 = Date.now();
-  if (!fixedUrl) while (!detected && !exited && Date.now() - t0 < 180000 && !signal?.aborted) await delay(500);
+  // Port Sonda'nın verdiğiyse adresin yazdırılması beklenmez: port da yoklanır ("listening on 4123" yazan bir sunucu
+  // her faz kapısında 3 dakika bekletmesin).
+  const portUrl = port ? `http://localhost:${port}` : null;
+  if (!fixedUrl) {
+    while (!detected && !exited && Date.now() - t0 < 180000 && !signal?.aborted) {
+      if (portUrl && (await responds(portUrl))) detected = portUrl;
+      else await delay(500);
+    }
+  }
   if (exited) return fail(`Sunucu kapandı (çıkış ${exited.code})`);
   const target = fixedUrl || detected || (port ? `http://localhost:${port}` : null);
   if (!target) return fail('Sunucu 3 dakikada bir adres yazdırmadı (planda devUrl tanımlı değil)');
@@ -309,4 +328,4 @@ async function runSmoke({ dir, routes, command, url, auth, log, signal }) {
   }
 }
 
-module.exports = { PROBE_JS, probeProblems, captureFile, startDevServer, runSmoke };
+module.exports = { PROBE_JS, probeProblems, captureFile, detectUrl, startDevServer, runSmoke };

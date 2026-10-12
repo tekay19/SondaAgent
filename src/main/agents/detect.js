@@ -1,8 +1,6 @@
 // Ajanların durumu: kurulu mu, giriş yapılmış mı, hangi plan — ve canlı bağlantı denetimi.
-const crossSpawn = require('cross-spawn');
 const os = require('os');
 const runner = require('../runner');
-const { agentEnv } = require('../env');
 const { claudeModelOf, claudeModelLabel } = require('../models');
 const { clip, AUTH_ERROR, ADAPTERS } = require('./adapters');
 const { resolveBin, versionOf, semver, cmpVersion, installKind, updateCommand, latestVersion } = require('./install');
@@ -38,37 +36,34 @@ async function authInfo(id, bin) {
 
 // `claude auth status` bazı giriş türlerinde (ör. Console / API Usage Billing ya da süresi
 // dolmuş ama yenilenebilir jeton) yanlış "giriş yok" diyebiliyor. Olumsuz sonucu gerçek bir
-// mini istekle doğrularız; sonuç 10 dk önbellekte tutulur.
+// mini istekle doğrularız. Başarılı sonuç 10 dk, başarısız sonuç 1 dk önbellekte tutulur (giriş akışı ve "yeniden
+// denetle" önbelleği atlar: `force`).
 const liveCheckCache = new Map();
+const LIVE_OK_TTL = 10 * 60000;
+const LIVE_FAIL_TTL = 60000;
 
-function liveCheck(bin) {
-  return new Promise((resolve) => {
-    const child = crossSpawn(bin, ['-p', '--output-format', 'json', '--model', 'haiku', '--no-session-persistence'], {
-      cwd: os.tmpdir(),
-      env: agentEnv(),
-      windowsHide: true,
-    });
-    let out = '';
-    let err = '';
-    const timer = setTimeout(() => child.kill(), 90000);
-    child.stdout?.on('data', (d) => (out += d));
-    child.stderr?.on('data', (d) => (err += d));
-    child.on('error', () => resolve({ ok: false, error: 'başlatılamadı' }));
-    child.on('close', () => {
-      clearTimeout(timer);
-      let r = null;
-      try {
-        r = JSON.parse(out.trim().split('\n').pop());
-      } catch {
-        /* JSON değil */
-      }
-      const text = r?.result || err || out;
-      if (r && !r.is_error) return resolve({ ok: true });
-      // Kimlik doğrulama dışı bir hata (ör. model erişimi) girişin çalıştığını gösterir.
-      resolve({ ok: !AUTH_ERROR.test(text), error: clip(String(text).trim(), 300) });
-    });
-    child.stdin?.end('Reply with exactly: OK');
+// Süreç ağacıyla birlikte kapatılabilen çalıştırıcıyla; MCP sunucuları yüklenmez (yalnızca giriş yoklanır).
+async function liveCheck(bin) {
+  const r = await runner.run({
+    command: bin,
+    args: ['-p', '--output-format', 'json', '--model', 'haiku', '--no-session-persistence', '--strict-mcp-config'],
+    cwd: os.tmpdir(),
+    env: agentRunEnv('claude', {}, 'review'),
+    input: 'Reply with exactly: OK',
+    timeoutMs: 90000,
+    tailSize: 20000,
   });
+  if (r.error) return { ok: false, error: 'başlatılamadı' };
+  let res = null;
+  try {
+    res = JSON.parse(String(r.stdout || '').trim().split('\n').pop());
+  } catch {
+    /* JSON değil */
+  }
+  if (res && !res.is_error) return { ok: true };
+  // Kimlik doğrulama dışı bir hata (ör. model erişimi) girişin çalıştığını gösterir.
+  const text = res?.result || r.stderr || r.stdout || '';
+  return { ok: !AUTH_ERROR.test(text), error: clip(String(text).trim(), 300) };
 }
 
 async function detect(settings, { force = false } = {}) {
@@ -80,12 +75,10 @@ async function detect(settings, { force = false } = {}) {
     let { loggedIn } = auth;
     let authError = null;
     if (bin && id === 'claude' && loggedIn !== true) {
-      // Yalnızca başarılı sonuç önbelleğe alınır; kullanıcı giriş yapınca hemen görülsün.
       const cached = liveCheckCache.get(bin);
-      const fresh = cached && Date.now() - cached.at < 10 * 60000 && !force;
+      const fresh = cached && Date.now() - cached.at < (cached.r.ok ? LIVE_OK_TTL : LIVE_FAIL_TTL) && !force;
       const r = fresh ? cached.r : await liveCheck(bin);
-      if (r.ok) liveCheckCache.set(bin, { at: Date.now(), r });
-      else liveCheckCache.delete(bin);
+      if (!fresh) liveCheckCache.set(bin, { at: Date.now(), r });
       loggedIn = r.ok;
       authError = r.ok ? null : r.error;
     }

@@ -5,6 +5,7 @@ const path = require('path');
 const runner = require('../runner');
 const project = require('../project');
 const { verifyEnv } = require('../env');
+const { killOrphans } = require('../procs');
 const { CHECK_TIMEOUT, pmBin, runScript } = require('./checks');
 
 // Üretim bağımlılıklarındaki bilinen güvenlik açıkları (npm/pnpm audit). Ağ yoksa ya da desteklenmiyorsa null.
@@ -75,7 +76,14 @@ async function freshCloneCheck({ dir, log = () => {}, signal }) {
     if (!signal?.aborted) log({ lvl: 'warn', text: `${name} çalıştırılamadı: ${e.message}` });
     return null;
   } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
+    // Klondaki testlerin açık bıraktığı süreçler (kilitli dosyaları da tutarlar) önce kapatılır. Silme hatası denetimin
+    // sonucunu ezmesin: Windows'ta kilitli kalan geçici klasörü işletim sistemi temizler.
+    await killOrphans(tmp).catch(() => {});
+    try {
+      fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 300 });
+    } catch {
+      /* geçici klasör */
+    }
   }
 }
 

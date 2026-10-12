@@ -44,7 +44,9 @@ function versionOf(bin) {
   } catch {
     v = null;
   }
-  if (v) versionCache.set(key, v);
+  // Başarısız sonuç da saklanır: her ajan başlatışında 15 sn'ye kadar süren eşzamanlı bir çağrı yinelenmesin. Anahtar
+  // dosyanın değişme zamanını içerdiğinden güncelleme ya da yeniden kurulum yeni bir sorgu açar.
+  versionCache.set(key, v);
   return v;
 }
 
