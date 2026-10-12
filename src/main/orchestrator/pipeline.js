@@ -14,6 +14,9 @@ const panelLib = require('../panel');
 const P = require('../prompts');
 const { SEVERE } = require('./shared');
 
+// Görev kodlanıp incelendi ama hafıza / commit adımı bitmedi (bkz. task.finishTask).
+const finishing = (t) => (t.status === 'done' || t.status === 'failed') && t.step === 'finishing';
+
 // Hafıza oturumuna giden fark üst sınırı: ajan değişen dosyaları kendisi okur; tüm farkı isteme koymak her görevde
 // on binlerce token ekliyordu. (Gemini'nin yazdığı hafıza dosya okuyamadığı için tüm farkı almaya devam eder.)
 const MEMORY_DIFF_CHARS = 30000;
@@ -47,7 +50,15 @@ class Pipeline {
       this.update({ phase: 'planning', error: null });
       return this.guarded(() => (this.job.kind ? this.planMaintenance() : this.plan()));
     }
-    for (const t of this.job.tasks) if (t.status !== 'done' && t.status !== 'skipped') t.status = 'pending';
+    // Plan onaylanmadan yürütülmez: onay beklerken yeniden planlama başarısız olduysa ya da durdurulduysa elde
+    // kalan plan kullanıcının reddettiği plandır. (Eski işlerde onay alanı yoktur; yürütme başladıysa onaylanmıştır.)
+    if (!this.job.approvedAt && !this.job.startedAt) {
+      this.log('system', 'info', 'Plan henüz onaylanmamıştı: onayınızı bekliyor.');
+      return this.update({ phase: 'awaiting_approval', error: null });
+    }
+    // Kesilen görevler kaldıkları yerden sürer; sorunlu kalmış görevler yeniden denenir. Kodlanıp incelenmiş ama
+    // hafıza / commit adımında kesilmiş görev ("finishing") yeniden yazılmaz: yalnızca o adım tamamlanır.
+    for (const t of this.job.tasks) if (t.status !== 'done' && t.status !== 'skipped' && !finishing(t)) t.status = 'pending';
     this.update({ error: null });
     this.guarded(() => this.pipeline());
   }
@@ -86,21 +97,31 @@ class Pipeline {
     job.phaseStart = job.phaseStart || {};
     const tasks = job.tasks;
     const multiPhase = new Set(tasks.map((t) => t.phase).filter(Boolean)).size > 1;
+    const touched = new Set(); // bu çalıştırmada kodu değişen fazlar
     for (let i = 0; i < tasks.length; i++) {
       const task = tasks[i];
-      const ran = task.status !== 'done' && task.status !== 'skipped';
-      if (ran) {
+      const ran = task.status !== 'done' && task.status !== 'skipped' && !finishing(task);
+      if (finishing(task)) {
+        this.checkAbort();
+        this.log('system', 'info', `"${task.title}" kodlanmış ve incelenmişti; yalnızca hafıza ve commit adımı tamamlanıyor.`);
+        await this.finishTask(task, i + 1);
+        touched.add(task.phase);
+      } else if (ran) {
         this.checkAbort();
         if (multiPhase && task.phase && !job.phaseStart[task.phase] && this.useGit) job.phaseStart[task.phase] = await project.headCommit(dir);
         await this.runTask(task, s);
+        touched.add(task.phase);
       }
-      // Faz bittiğinde kalite kapısı. Son faz, son doğrulamayla birlikte değerlendirilir.
+      // Faz bittiğinde kalite kapısı. Son faz, son doğrulamayla birlikte değerlendirilir. Sürdürmede bir kapı yalnızca
+      // hiç bitmediyse, katı kapı işi durdurduysa ya da fazında bir görev yeniden çalıştıysa tekrarlanır.
       const next = tasks[i + 1];
-      if (multiPhase && task.phase && next && next.phase !== task.phase && job.gates[task.phase]?.status !== 'passed') {
+      const gate = job.gates[task.phase];
+      const gateDue = !gate || (gate.status !== 'passed' && (gate.status !== 'failed' || gate.blocked || touched.has(task.phase)));
+      if (multiPhase && task.phase && next && next.phase !== task.phase && gateDue) {
         await this.runPhaseGate(task.phase, s);
       }
       // Bağımsız denetim: birkaç görevde bir, bitmiş kodun tamamı kalan görevlerle birlikte denetlenir (bkz. audit.js).
-      if ((ran && this.auditDue(i, s)) || this.auditInterrupted(task)) {
+      if ((ran && this.auditDue(i, s)) || this.auditInterrupted(task, s)) {
         this.checkAbort();
         await this.runAudit(i, s);
       }
@@ -163,7 +184,8 @@ class Pipeline {
     const job = this.job;
     const dir = job.projectDir;
     const lang = this.userLang();
-    const gateNo = Object.keys(job.gates).length + 1;
+    // Ekran görüntüsü etiketi fazın plandaki sırasıdır: yeniden çalışan kapı başka bir fazın görüntülerini ezmez.
+    const gateNo = [...new Set(job.tasks.map((t) => t.phase).filter(Boolean))].indexOf(phaseName) + 1;
     const gate = (job.gates[phaseName] = { status: 'running', attempts: 0 });
     this.update({ phase: 'verifying', currentTaskId: null });
     this.log('system', 'step', `Faz kapısı: "${phaseName}" — tam doğrulama, entegrasyon testleri ve regresyon incelemesi`);
@@ -221,6 +243,7 @@ class Pipeline {
         deep,
         panel: pnl,
         recheck,
+        openBefore: openNow,
         at: `gate:${phaseName}`,
         label: `faz "${phaseName}"`,
         canVerify: deepOn,
@@ -265,6 +288,7 @@ ${(review.issues || []).map((i) => `- Açık: ${i}`).join('\n')}`);
     this.update({ phase: 'running' });
 
     if (gate.status === 'failed' && s.strictPhaseGates) {
+      gate.blocked = true; // sürdürmede bu kapı yeniden çalışır
       throw new Error(`"${phaseName}" fazının kalite kapısı ${s.maxFixAttempts} düzeltme turundan sonra geçilemedi; sonraki faz sağlam olmayan bir temel üzerine kurulmasın diye durduruldu. Açık sorunlar yukarıda. Talimat ekleyip "Sürdür" diyebilir ya da Ayarlar'dan katı faz kapısını kapatabilirsiniz.`);
     }
   }
@@ -398,6 +422,7 @@ ${diff?.stat ? `### Değişen dosyalar\n\`\`\`\n${diff.stat}\n\`\`\`` : ''}`);
         deep,
         panel: pnl,
         recheck,
+        openBefore: openNow,
         at: 'final',
         label: 'son kabul',
         canVerify: deepOn,

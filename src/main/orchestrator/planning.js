@@ -185,10 +185,12 @@ class Planning {
         attempts: 0,
       })),
       phase: 'awaiting_approval',
+      approvedAt: null, // yeni plan: önceki onay geçersiz
     });
 
     if (s.autoApprove) {
       this.log('system', 'info', 'Otomatik onay açık — başlatılıyor.');
+      this.update({ approvedAt: Date.now() });
       await this.pipeline();
     }
   }
@@ -372,6 +374,8 @@ class Planning {
     if (this.running || !this.job?.plan || this.job.phase !== 'awaiting_approval') throw new Error('Onaylanacak plan yok.');
     const skip = new Set(Array.isArray(skipTaskIds) ? skipTaskIds : []);
     for (const t of this.job.tasks) if (skip.has(t.id) && t.status === 'pending') t.status = 'skipped';
+    // Onay kaydedilir: "Sürdür" yalnızca onaylanmış bir planı yürütür (bkz. resume).
+    this.update({ approvedAt: Date.now() });
     this.guarded(() => this.pipeline());
   }
 

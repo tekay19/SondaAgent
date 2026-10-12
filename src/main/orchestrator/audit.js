@@ -26,16 +26,21 @@ class Audit {
    */
   auditDue(index, s) {
     const job = this.job;
-    if (s.independentAudit === false || s.reviewLevel === 'standard' || !this.useGit || !this.reviewerId()) return false;
+    if (!this.auditEnabled(s)) return false;
     if (!this.auditUpcoming(index).length) return false;
     const last = (job.audits || []).filter((a) => a.status === 'done').at(-1);
     const lastIdx = last ? job.tasks.findIndex((t) => t.id === last.afterTask) : -1;
     return index - lastIdx >= Math.max(1, s.auditEvery || 3);
   }
 
-  // Uygulama kapanınca yarıda kalan denetim, sürdürmede aynı yerden yeniden yapılır.
-  auditInterrupted(task) {
-    return (this.job.audits || []).some((a) => a.afterTask === task.id && a.status !== 'done');
+  // Denetim yapılabilir mi? Kapalıysa, standart inceleme seviyesinde, git yokken ya da inceleyecek ajan yokken yapılmaz.
+  auditEnabled(s) {
+    return s.independentAudit !== false && s.reviewLevel !== 'standard' && !!this.useGit && !!this.reviewerId();
+  }
+
+  // Uygulama kapanınca yarıda kalan denetim, sürdürmede aynı yerden yeniden yapılır (denetim yapılabiliyorsa).
+  auditInterrupted(task, s) {
+    return this.auditEnabled(s) && (this.job.audits || []).some((a) => a.afterTask === task.id && a.status !== 'done');
   }
 
   auditUpcoming(index) {
@@ -44,11 +49,29 @@ class Audit {
 
   async runAudit(index, s) {
     const job = this.job;
-    const dir = job.projectDir;
     const after = job.tasks[index];
     const rid = this.reviewerId();
     const audits = (job.audits = job.audits || []);
     const prev = audits.findIndex((a) => a.afterTask === after.id && a.status !== 'done');
+    // Uygulama aşamasında kesilen denetim: öneriler zaten doğrulanıp deftere yazılmıştı. Denetim tekrarlanmaz (yeni
+    // turdaki aynı öneriler "zaten izleniyor" sayılıp hiç uygulanmazdı); açık kalanlar uygulanır.
+    if (prev >= 0 && audits[prev].status === 'applying' && Array.isArray(audits[prev].items)) {
+      const rec = audits[prev];
+      const ledger = this.ledger();
+      const items = rec.items
+        .map((x) => {
+          const f = ledger.find((l) => l.id === x.id);
+          return f && f.status === 'open' ? { ...f, kind: x.kind, before: x.before } : null;
+        })
+        .filter(Boolean);
+      this.log('review', 'step', `Bağımsız denetim ${rec.n} uygulama sırasında kesilmişti: denetim tekrarlanmıyor, açık kalan ${items.length} doğrulanmış öneri uygulanıyor.`);
+      if (!items.length) {
+        Object.assign(rec, { status: 'done', finishedAt: Date.now() });
+        this.update({ phase: 'running' });
+        return rec;
+      }
+      return this.applyAudit(rec, items, s, { resumed: true });
+    }
     const rec = { n: prev >= 0 ? audits[prev].n : audits.length + 1, afterTask: after.id, startedAt: Date.now(), status: 'running', summary: '', suggestions: [], strengths: [] };
     if (prev >= 0) audits[prev] = rec;
     else audits.push(rec);
@@ -112,6 +135,23 @@ class Audit {
       this.update({ phase: 'running' });
       return rec;
     }
+    // Uygulama aşaması kaydedilir: bu sırada kesilirse sürdürmede aynı öneriler uygulanır.
+    rec.status = 'applying';
+    rec.items = items.map((f) => ({ id: f.id, kind: f.kind, before: f.before }));
+    this.update();
+    return this.applyAudit(rec, items, s);
+  }
+
+  /**
+   * Doğrulanmış önerilerin uygulanması. `resumed`: kesilmiş bir uygulama sürdürülüyor — yarım düzeltmeler sürdürmenin
+   * başındaki commit'e girdiği için proje "denetimden önceki" halde değildir; geri alma güvencesi verilmez.
+   */
+  async applyAudit(rec, items, s, { resumed = false } = {}) {
+    const job = this.job;
+    const dir = job.projectDir;
+    const label = `bağımsız denetim ${rec.n}`;
+    const at = `audit:${rec.n}`;
+    const ledger = this.ledger();
 
     // Uygulama: sonraki görevden önce ayrı bir kodlama oturumu. Akışı bozmama güvencesi: önce kontrollerin durumu
     // kaydedilir; düzeltme daha önce geçen bir kontrolü bozarsa aynı oturumda bir onarım turu yapılır, o da yetmezse
@@ -121,7 +161,7 @@ class Audit {
     const tree = project.fileTree(dir, { maxEntries: 300, maxDepth: 5 });
     const runChecks = () => this.checksOnline(() => verify.runChecks({ dir, log: (l) => this.log('test', l.lvl, l.text), signal: this.signal }));
     const failing = (cs) => cs.filter((c) => !c.ok && !c.env).map((c) => c.cmd || c.name);
-    const canRevert = this.useGit && (await project.isClean(dir));
+    const canRevert = !resumed && this.useGit && (await project.isClean(dir));
     let before = [];
     if (canRevert) {
       this.update({ phase: 'verifying' });

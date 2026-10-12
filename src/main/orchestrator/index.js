@@ -163,7 +163,13 @@ class Orchestrator {
     this.crash = null;
     const ctrl = (this.ctrl = new AbortController());
     this.emit({ type: 'busy', busy: true });
-    fn()
+    let work;
+    try {
+      work = Promise.resolve(fn());
+    } catch (err) {
+      work = Promise.reject(err);
+    }
+    work
       .catch((err) => this.fail(err))
       .finally(() => {
         // Bu çalışmaya ait hiçbir süreç (paralel inceleme oturumu, komut, istek) arkada kalmasın.
@@ -172,7 +178,15 @@ class Orchestrator {
         if (this.ctrl === ctrl) this.ctrl = null;
         if (this.job) jobs.save(this.job, { immediate: true });
         this.emit({ type: 'busy', busy: false });
-      });
+      })
+      // Hata yolunun kendisi (kayıt, bildirim) hata verse bile işlenmemiş bir Promise reddi ana süreci düşürmesin.
+      .catch((err) => console.error('[sonda] iş zinciri:', err));
+  }
+
+  // İnceleme önerileri her kapı ve son kabul istemine girer: tekrarlar atılır, en yeni 60 öneri tutulur.
+  addSuggestions(list) {
+    const all = [...(this.job.suggestions || []), ...(list || [])].filter((x) => typeof x === 'string' && x.trim());
+    this.job.suggestions = [...new Set(all.reverse())].reverse().slice(-60);
   }
 
   /**

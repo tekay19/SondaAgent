@@ -15,7 +15,7 @@ class Task {
     const job = this.job;
     const n = job.tasks.indexOf(task) + 1;
     job.currentTaskId = task.id;
-    this.setTask(task, { status: 'running', startedAt: Date.now(), attempts: 0 });
+    this.setTask(task, { status: 'running', step: 'working', startedAt: Date.now(), attempts: 0 });
     this.log('system', 'step', `Görev ${n}/${job.tasks.length}: ${task.title}`);
     const carried = await this.beginTask(task);
     const tree = project.fileTree(job.projectDir, { maxEntries: 300, maxDepth: 5 });
@@ -114,6 +114,9 @@ class Task {
     const dir = job.projectDir;
     const app = project.nodeApp(dir);
     if (!(s.tddMode && n > 1 && app?.scripts?.test && (task.tests?.length || task.acceptance?.length) && this.useGit)) return;
+    // Testler önceki çalışmada yazılıp commit'lendiyse (görev kesildi ya da sorunlu kalıp yeniden deneniyor) yeniden
+    // yazdırılmaz: ikinci bir test takımı ilkini ezer.
+    if (task.tddCommit) return;
     this.log('system', 'step', `TDD · QA mühendisi önce "${task.title}" testlerini yazıyor…`);
     const before = await project.headCommit(dir);
     const isTest = (f) => /(^|\/)(__tests__|tests?|e2e|spec)\/|\.(test|spec)\.[cm]?[jt]sx?$/.test(f);
@@ -211,7 +214,7 @@ class Task {
       this.setTask(task, { status: 'reviewing' });
       const { review, coreOk, src } = await this.reviewTask(task, s, { checks, res, attempt, round, mine: attempt > 0 ? openMine() : [] });
       task.review = review;
-      job.suggestions.push(...review.suggestions);
+      this.addSuggestions(review.suggestions);
       this.logReview(review, `İnceleme (${task.title})`, src);
 
       if (review.verdict === 'pass') {
@@ -317,11 +320,12 @@ class Task {
     return { review, coreOk, src };
   }
 
-  // Görev bitti: hafıza güncellenir, değişiklikler görevin adına commit'lenir.
+  // Görev bitti: hafıza güncellenir, değişiklikler görevin adına commit'lenir. Adım kaydedilir: bu sırada kesilirse
+  // sürdürmede görev yeniden yazılmaz, yalnızca bu adım tamamlanır (bkz. pipeline.resume).
   async finishTask(task, n) {
     const job = this.job;
     const dir = job.projectDir;
-    this.setTask(task, { finishedAt: Date.now() });
+    this.setTask(task, { finishedAt: Date.now(), step: 'finishing' });
     await this.remember(task, `Görev ${n}/${job.tasks.length} — ${task.title}`);
     if (this.useGit) {
       const hash = await this.commit(dir, `sonda: ${task.title}${task.status === 'failed' ? ' (sorunlu)' : ''}`, task.id);
@@ -330,7 +334,7 @@ class Task {
         this.log('system', 'dim', `commit ${hash}`);
       }
     }
-    this.update();
+    this.setTask(task, { step: 'closed' });
   }
 }
 

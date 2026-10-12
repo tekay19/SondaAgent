@@ -185,9 +185,10 @@ class Maintenance {
       this.log('system', 'info', feat ? 'Özellik için görev planı çıkarılamadı; ayrıntılar raporda.' : bug ? 'Düzeltilecek bir kusur bulunamadı; ayrıntılar raporda.' : 'Değişiklik gerektiren bir şey bulunmadı; ayrıntılar raporda.');
       return;
     }
-    this.update({ ...patch, phase: 'awaiting_approval' });
+    this.update({ ...patch, phase: 'awaiting_approval', approvedAt: null });
     if (s.autoApprove) {
       this.log('system', 'info', 'Otomatik onay açık — başlatılıyor.');
+      this.update({ approvedAt: Date.now() });
       await this.pipeline();
     }
   }

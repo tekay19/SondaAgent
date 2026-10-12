@@ -365,6 +365,7 @@ body:not(.darwin) .app.side-collapsed .job-header { padding-left: 60px; }
 .ready-item > span { flex: 1; min-width: 0; }
 .ready-item b { color: var(--text); font-weight: 600; }
 .ready-item code { background: var(--code-bg); padding: 1px 6px; border-radius: 4px; color: var(--text); }
+.cmd-list code { background: var(--code-bg); padding: 1px 6px; border-radius: 4px; color: var(--text); overflow-wrap: anywhere; }
 .ready-item .btn { flex: none; height: 28px; padding: 0 10px; font-size: 12.5px; }
 
 .composer {

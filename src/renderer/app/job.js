@@ -237,6 +237,7 @@ function renderPlanContent() {
         ${reqs.length ? requirementsHtml(job, fold) : ''}
         ${p.assumptions?.length ? fold('Varsayımlar', `<ul class="bullets">${p.assumptions.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>`, p.assumptions.length, false) : ''}
         ${String(p.designDirection || '').trim() ? fold('Tasarım yönü', `<div class="md design-direction">${md(p.designDirection)}</div>`, null, false) : ''}
+        ${commandsHtml(p, fold, approving)}
         ${auditHtml}
         ${ledgerHtml}
         ${lessonsHtml}
@@ -297,6 +298,19 @@ function panelLine(pn) {
 }
 
 // Görevleri fazlara göre gruplar; her fazın kalite kapısı durumunu gösterir.
+// Planın Sonda'ya doğrudan çalıştırdığı komutlar (faz kapıları ve son kabul): onaydan önce görülsün.
+function commandsHtml(p, fold, approving) {
+  const v = p.verify || {};
+  const rows = [
+    ...(v.setup || []).map((c) => ['servis', c]),
+    ...(v.commands || []).map((c) => ['kontrol', c]),
+    ...(v.devCommand ? [['sunucu', v.devCommand]] : []),
+  ].filter(([, c]) => String(c || '').trim());
+  if (!rows.length) return '';
+  const intro = '<p class="summary-text">Faz kapılarında ve son kabulde Sonda bu komutları proje klasöründe kendisi çalıştırır (her görevden sonra çalışan kurulum, lint, tip kontrolü, test ve derlemeye ek olarak). Onaylamadan önce göz at.</p>';
+  return fold('Sonda\'nın çalıştıracağı komutlar', `${intro}<ul class="bullets cmd-list">${rows.map(([k, c]) => `<li><span class="badge">${k}</span> <code>${esc(c)}</code></li>`).join('')}</ul>`, rows.length, approving);
+}
+
 function tasksHtml(job, approving) {
   const phases = [];
   job.tasks.forEach((t, i) => {

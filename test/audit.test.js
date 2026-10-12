@@ -81,8 +81,14 @@ test('Denetim zamanı: her N görevde bir, yalnızca kalan görev varken; kapal�
     o.useGit = false;
     assert.strictEqual(o.auditDue(5, S()), false);
     // Yarıda kalan denetim sürdürmede yeniden yapılır; bitmiş olan yapılmaz.
+    o.useGit = true;
     o.job.audits.push({ n: 2, afterTask: 't6', status: 'running' });
-    assert.deepStrictEqual([o.auditInterrupted(o.job.tasks[5]), o.auditInterrupted(o.job.tasks[2])], [true, false]);
+    assert.deepStrictEqual([o.auditInterrupted(o.job.tasks[5], S()), o.auditInterrupted(o.job.tasks[2], S())], [true, false]);
+    // Denetim artık yapılamıyorsa (git kapalı, standart seviye) yarım kalan denetim de yeniden yapılmaz.
+    o.useGit = false;
+    assert.strictEqual(o.auditInterrupted(o.job.tasks[5], S()), false);
+    o.useGit = true;
+    assert.strictEqual(o.auditInterrupted(o.job.tasks[5], S({ reviewLevel: 'standard' })), false);
   } finally {
     restore();
   }
@@ -185,7 +191,7 @@ test('Denetim: yarıda kalan denetim aynı numarayla yeniden yapılır; eski iş
     // Yeni sürüme geçen eski bir iş: denetim kaydı yok, görevler bitmiş. Döngü bitmiş görevlerde denetim açmaz
     // (pipeline yalnızca bu çalıştırmada biten görevden sonra auditDue'ya bakar).
     o.job.audits = undefined;
-    assert.strictEqual(o.auditInterrupted(o.job.tasks[0]), false);
+    assert.strictEqual(o.auditInterrupted(o.job.tasks[0], S()), false);
   } finally {
     restore();
   }

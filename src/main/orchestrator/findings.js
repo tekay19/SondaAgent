@@ -118,7 +118,7 @@ class Findings {
    * güvenlik denetimi ve derin inceleme eklenir, doğrulanmış bulgular deftere yazılıp engelleyici olur, defterde
    * hâlâ açık olanlar (`recheck.still`) eklenir. `keepPrev`: düzeltme turunda önceki panel özeti korunur.
    */
-  async settleRound({ raw, checks, extra = {}, security = [], deep = null, panel = null, recheck = null, at, label, canVerify, prevPanel = null, keepPrev = false }) {
+  async settleRound({ raw, checks, extra = {}, security = [], deep = null, panel = null, recheck = null, openBefore = [], at, label, canVerify, prevPanel = null, keepPrev = false }) {
     let review = this.normalizeReview(raw, checks, extra);
     const mf = this.managerFindings(review);
     const rid = canVerify ? this.reviewerId() : null;
@@ -131,7 +131,13 @@ class Findings {
     }
     if (review.scoreNote) this.log('review', 'info', review.scoreNote);
     if (keepPrev || !review.panel) review.panel = this.keepPanel(review.panel, prevPanel);
-    if (recheck) review = panelLib.mergeOpenFindings(review, recheck.still, { labels: PANEL_LABELS });
+    // Turun başında açık olup doğrulayıcının karara bağlayamadığı kayıtlar (oturum düştü, yalnızca bir kısmı bitti) de
+    // "hâlâ duruyor" sayılır: defter kapanmadan faz kapısı ve son kabul geçilmez. (Sonuçlanan kayıtların durumu
+    // yeniden doğrulamada defterde güncellenir; "open" kalanlar ya hâlâ duruyor ya da hiç kontrol edilemedi.)
+    const still = recheck?.still || [];
+    const stillIds = new Set(still.map((f) => f.id));
+    const unchecked = openBefore.filter((f) => f.status === 'open' && f.severity !== 'low' && !stillIds.has(f.id));
+    if (recheck || unchecked.length) review = panelLib.mergeOpenFindings(review, [...still, ...unchecked], { labels: PANEL_LABELS });
     return review;
   }
 

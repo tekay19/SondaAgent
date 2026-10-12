@@ -868,3 +868,214 @@ test('İptali geri alma: plan hazırsa onaya, sorular cevaplanmadıysa sorulara 
     jobs._setRoot(null);
   }
 });
+
+// ---------- iş durum makinesi: onay, sürdürme noktaları, kapanmamış bulgular ----------
+const idle = async (o) => {
+  for (let i = 0; i < 400 && o.running; i++) await new Promise((r) => setTimeout(r, 5));
+};
+
+test('Sürdür: onaylanmamış plan çalıştırılmaz, onaya döner; onaylanan (ya da yürütmesi başlamış eski) iş sürer', async () => {
+  const jobs = require('../src/main/jobs');
+  jobs._setRoot(tmp());
+  try {
+    const mk = (extra) => {
+      const o = orch({ phase: 'failed', tasks: [{ id: 't1', title: 'a', status: 'pending' }], ...extra });
+      o.calls = [];
+      o.pipeline = async () => o.calls.push('pipeline');
+      return o;
+    };
+    // Plan onay beklerken yeniden planlama başarısız olmuş: eski (reddedilen) plan çalıştırılmamalı.
+    const a = mk({});
+    a.resume();
+    await idle(a);
+    assert.deepStrictEqual([a.job.phase, a.calls], ['awaiting_approval', []]);
+    const b = mk({ approvedAt: 1 });
+    b.resume();
+    await idle(b);
+    assert.deepStrictEqual(b.calls, ['pipeline']);
+    // approvedAt alanı olmayan eski iş: yürütmesi başlamışsa (startedAt) onaylanmış sayılır.
+    const c = mk({ startedAt: 5 });
+    c.resume();
+    await idle(c);
+    assert.deepStrictEqual(c.calls, ['pipeline']);
+    const d = mk({ phase: 'awaiting_approval' });
+    d.approve();
+    await idle(d);
+    assert.ok(d.job.approvedAt > 0, 'onay kaydedilir');
+  } finally {
+    jobs.flushAll();
+    jobs._setRoot(null);
+  }
+});
+
+test('Sürdür: commit\'ten önce kesilen görev yeniden yazılmaz, yalnızca hafıza ve commit tamamlanır; boşuna faz kapısı tekrarlanmaz', async () => {
+  const jobs = require('../src/main/jobs');
+  jobs._setRoot(tmp());
+  const plan = { projectName: 'P', summary: 's', stack: [], requirements: [{ id: 'R1', text: 'a' }], assumptions: [], spec: 's', language: 'Turkish', verify: {} };
+  const run = async (tasks, gates) => {
+    const o = orch({ phase: 'stopped', approvedAt: 1, plan, tasks, gates, phaseStart: {} });
+    const calls = [];
+    o.runTask = async (t) => {
+      calls.push(`run:${t.id}`);
+      t.status = 'done';
+      t.step = 'closed';
+    };
+    o.finishTask = async (t) => {
+      calls.push(`finish:${t.id}`);
+      t.step = 'closed';
+    };
+    o.runPhaseGate = async (p) => {
+      calls.push(`gate:${p}`);
+      o.job.gates[p] = { status: 'passed' };
+    };
+    o.finalStage = async () => calls.push('final');
+    o.commit = async () => null;
+    o.reviewerId = () => null;
+    o.resume();
+    await idle(o);
+    assert.ok(!o.job.error, o.job.error);
+    return calls;
+  };
+  try {
+    // t1 kodlandı ve incelendi, hafıza / commit adımında kesildi: yalnızca o adım tamamlanır, sonra fazın kapısı.
+    assert.deepStrictEqual(await run([{ id: 't1', phase: 'A', title: 'a', status: 'done', step: 'finishing' }, { id: 't2', phase: 'B', title: 'b', status: 'pending' }], {}), ['finish:t1', 'gate:A', 'run:t2', 'final']);
+    // A'nın kapısı geçilememişti ama iş devam etmişti (katı değil); A'da hiçbir görev yeniden çalışmadı: kapı tekrarlanmaz.
+    assert.deepStrictEqual(await run([{ id: 't1', phase: 'A', title: 'a', status: 'done' }, { id: 't2', phase: 'B', title: 'b', status: 'pending' }], { A: { status: 'failed' } }), ['run:t2', 'final']);
+    // Katı kapı işi durdurmuştu: sürdürmede kapı yeniden çalışır.
+    assert.deepStrictEqual(await run([{ id: 't1', phase: 'A', title: 'a', status: 'done' }, { id: 't2', phase: 'B', title: 'b', status: 'pending' }], { A: { status: 'failed', blocked: true } }), ['gate:A', 'run:t2', 'final']);
+    // Sorunlu kalmış görev sürdürmede yeniden denenir (tasarım gereği); fazı değiştiği için kapısı da yeniden çalışır.
+    assert.deepStrictEqual(await run([{ id: 't1', phase: 'A', title: 'a', status: 'failed', step: 'closed' }, { id: 't2', phase: 'B', title: 'b', status: 'pending' }], { A: { status: 'failed' } }), ['run:t1', 'gate:A', 'run:t2', 'final']);
+  } finally {
+    jobs.flushAll();
+    jobs._setRoot(null);
+  }
+});
+
+test('Faz kapısı ve son kabul: doğrulayıcı çalışamazsa açık bulgular "kapandı" sayılmaz', async () => {
+  const L = require('../src/main/panel');
+  const g = stageHarness({ reviews: [PASS], panel: null });
+  try {
+    g.o.recheckFindings = async () => null; // doğrulayıcı oturumu sonuç vermedi
+    L.ledgerAdd(g.o.ledger(), [finding('medium', 'Terminal durum eziliyor', { file: 'src/store.ts' })], { at: 'task:t1', label: 'görev "Pipeline"' });
+    await assert.rejects(() => g.o.runPhaseGate('Faz 1', g.s), /kalite kapısı/);
+    assert.strictEqual(g.o.job.gates['Faz 1'].status, 'failed');
+    assert.match(g.calls.prompts['faz düzeltme 1/2'], /Terminal durum eziliyor/);
+  } finally {
+    g.restore();
+  }
+  const f = stageHarness({ reviews: [PASS], panel: null });
+  try {
+    f.o.recheckFindings = async () => null;
+    f.o.job.tasks[1].status = 'done';
+    L.ledgerAdd(f.o.ledger(), [finding('medium', 'Bing geçici hatada RSS\'e düşmüyor', { file: 'src/bing.ts' })], { at: 'task:t1', label: 'görev "Arama"' });
+    await f.o.finalStage({ ...f.s, finalFixAttempts: 1, maxFixAttempts: 1 });
+    assert.strictEqual(f.o.job.phase, 'incomplete');
+    assert.match(f.o.job.finalReview.issues.join('\n'), /Bing geçici hatada/);
+  } finally {
+    f.restore();
+  }
+});
+
+test('TDD: testler zaten yazılmışsa (kesintiden sonra) QA oturumu yeniden çalışmaz', async () => {
+  const o = orch();
+  fs.writeFileSync(path.join(o.job.projectDir, 'package.json'), JSON.stringify({ name: 'x', scripts: { test: 'vitest' } }));
+  o.useGit = true;
+  const labels = [];
+  o.runAgent = async (p, opts = {}) => {
+    labels.push(opts.label);
+    return { ok: true };
+  };
+  const task = { id: 't2', title: 'b', tests: ['x'], acceptance: [], tddCommit: 'abc1234', tddFiles: ['a.test.ts'] };
+  await o.writeTddTests(task, { tddMode: true }, 2);
+  assert.deepStrictEqual(labels, []);
+  assert.deepStrictEqual(task.tddFiles, ['a.test.ts']);
+});
+
+test('Bağımsız denetim: inceleyici yoksa yarım denetim çökmez; uygulama aşamasında kesildiyse aynı öneriler yeniden uygulanır', async () => {
+  const L = require('../src/main/panel');
+  const project = require('../src/main/project');
+  const jobs = require('../src/main/jobs');
+  jobs._setRoot(tmp());
+  const saved = { isClean: project.isClean, headCommit: project.headCommit, fileTree: project.fileTree };
+  Object.assign(project, { isClean: async () => true, headCommit: async () => 'abc1234', fileTree: () => 'src/' });
+  try {
+    const tasks = [{ id: 't1', title: 'a', status: 'done' }, { id: 't2', title: 'b', status: 'pending' }];
+    const o = orch({ tasks, plan: { requirements: [{ id: 'R1', text: 'a' }], language: 'Turkish', verify: {}, summary: 's', stack: ['Node'] }, audits: [{ n: 1, afterTask: 't1', status: 'applying', items: [{ id: 'F1', kind: 'readiness', before: 't2' }] }] });
+    const s = { reviewLevel: 'deep', independentAudit: true, auditEvery: 3, standards: '' };
+    o.useGit = true;
+    o.reviewerId = () => null;
+    assert.strictEqual(o.auditInterrupted(tasks[0], s), false, 'inceleyici yokken yarım denetim atlanır');
+    o.reviewerId = () => 'claude';
+    assert.strictEqual(o.auditInterrupted(tasks[0], s), true);
+    L.ledgerAdd(o.ledger(), [finding('medium', 'SDK sözleşmesi eksik', { file: 'src/sdk.ts', area: 'audit' })], { at: 'audit:1', label: 'bağımsız denetim 1' });
+    const labels = [];
+    o.withCleanTree = (fn) => fn();
+    o.checksOnline = async () => [];
+    o.remember = async () => {};
+    o.commit = async () => 'c0ffee1';
+    o.runAgent = async (prompt, opts = {}) => {
+      labels.push(opts.label);
+      if (opts.label === 'bulgu yeniden doğrulama') return { structured: { results: [{ id: 'F1', verdict: 'fixed', reason: 'ok' }] } };
+      return { ok: true, text: 'uyguladım' };
+    };
+    const rec = await o.runAudit(0, s);
+    assert.ok(!labels.includes('bağımsız denetim 1'), 'denetim baştan yapılmadı');
+    assert.ok(labels.includes('denetim düzeltmeleri 1'), 'doğrulanmış öneriler uygulandı');
+    assert.strictEqual(rec.status, 'done');
+    assert.strictEqual(o.ledger()[0].status, 'fixed');
+  } finally {
+    Object.assign(project, saved);
+    jobs.flushAll();
+    jobs._setRoot(null);
+  }
+});
+
+test('İş zinciri: hata yolundaki bir hata bile işlenmemiş Promise reddine dönüşmez', async () => {
+  const jobs = require('../src/main/jobs');
+  jobs._setRoot(tmp());
+  const seen = [];
+  const onRejection = (e) => seen.push(e);
+  process.on('unhandledRejection', onRejection);
+  try {
+    const o = orch();
+    o.fail = () => {
+      throw new Error('fail patladı');
+    };
+    o.guarded(async () => {
+      throw new Error('iş hatası');
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    assert.strictEqual(seen.length, 0, String(seen[0]));
+    assert.strictEqual(o.running, false);
+  } finally {
+    process.off('unhandledRejection', onRejection);
+    jobs.flushAll();
+    jobs._setRoot(null);
+  }
+});
+
+test('Öneriler: aynı öneri tekrar eklenmez, liste sınırlı kalır (her kapı istemine girer)', () => {
+  const o = orch();
+  o.addSuggestions(['a', 'b', 'a']);
+  o.addSuggestions(Array.from({ length: 100 }, (_, i) => `s${i}`));
+  assert.ok(o.job.suggestions.length <= 60);
+  assert.strictEqual(new Set(o.job.suggestions).size, o.job.suggestions.length);
+  assert.ok(o.job.suggestions.includes('s99'), 'en yeniler korunur');
+});
+
+test('Faz kapısı ekran görüntüsü etiketi faz başına sabittir (yeniden çalışan kapı başka fazın görüntülerini ezmez)', async () => {
+  const h = stageHarness({ reviews: [PASS], panel: null });
+  try {
+    const tags = [];
+    h.o.runBrowserTest = async (s, tag) => {
+      tags.push(tag);
+      return null;
+    };
+    await h.o.runPhaseGate('Faz 2', h.s);
+    await h.o.runPhaseGate('Faz 1', h.s);
+    await h.o.runPhaseGate('Faz 1', h.s);
+    assert.deepStrictEqual(tags, ['g2-0', 'g1-0', 'g1-0']);
+  } finally {
+    h.restore();
+  }
+});
