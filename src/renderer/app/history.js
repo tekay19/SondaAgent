@@ -84,7 +84,7 @@ function renderHistory() {
       const foldBtn = g.children.length
         ? `<button class="h-fold ${folded ? 'folded' : ''}" data-fold="${esc(g.key)}" aria-expanded="${!folded}" title="${folded ? `${g.children.length} alt işi göster` : 'Alt işleri gizle'}" aria-label="${folded ? 'Alt işleri göster' : 'Alt işleri gizle'}"><svg class="ico" aria-hidden="true"><use href="#i-chevron"/></svg>${folded ? `<span class="h-count">${g.children.length}</span>` : ''}</button>`
         : '';
-      const rootRow = `<li class="proj ${isActiveRow(g.root)} ${hasActive ? 'has-active' : ''}" data-id="${esc(g.root.id)}" title="${esc(g.root.projectDir || '')}">
+      const rootRow = `<li class="proj ${isActiveRow(g.root)} ${hasActive ? 'has-active' : ''}" data-id="${esc(g.root.id)}" title="${esc(g.root.projectDir || '')}" tabindex="0" role="button">
           <span class="dot ${live && !state.running.has(g.root.id) ? 'running' : dotClass(g.root)}"></span>
           <div style="min-width:0"><div class="h-title">${esc(g.title)}</div>
           <div class="h-sub">${esc(baseName(g.root.projectDir))} · ${relDate(g.last)}</div></div>
@@ -92,7 +92,7 @@ function renderHistory() {
       const childRows = shown
         .map((c) => {
           const label = c.kind ? KIND_LABEL[c.kind] : 'Ek istek';
-          return `<li class="child ${isActiveRow(c)}" data-id="${esc(c.id)}" title="${esc(c.idea || '')}">
+          return `<li class="child ${isActiveRow(c)}" data-id="${esc(c.id)}" title="${esc(c.idea || '')}" tabindex="0" role="button">
               <span class="dot ${dotClass(c)}"></span>
               <div style="min-width:0"><div class="h-title"><span class="h-kind kind-${esc(c.kind || 'more')}">${esc(label)}</span> ${esc(firstLine(c.idea, 80))}</div>
               <div class="h-sub">${relDate(c.createdAt)}</div></div>
@@ -126,7 +126,7 @@ $('#history').addEventListener('click', async (e) => {
   if (del) {
     e.stopPropagation();
     if (!confirm('Bu iş geçmişten silinsin mi? (Proje dosyalarına dokunulmaz.)')) return;
-    await attempt(() => api.deleteJob(del.dataset.del));
+    if (!(await attempt(() => api.deleteJob(del.dataset.del)))) return; // silinemedi (ör. çalışıyor): görünüm değişmez
     if (state.followId === del.dataset.del) {
       state.followId = null;
       state.job = null;
@@ -138,13 +138,31 @@ $('#history').addEventListener('click', async (e) => {
   const li = e.target.closest('li[data-id]');
   if (li) openJob(li.dataset.id);
 });
+// Klavye: geçmişteki iş satırları Enter / boşlukla açılır.
+$('#history').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const li = e.target.closest('li[data-id]');
+  if (!li || e.target !== li) return;
+  e.preventDefault();
+  openJob(li.dataset.id);
+});
 
 async function openJob(id) {
+  // Yükleme sırasında gelen log satırları biriktirilir (bkz. main.js) ve diskten okunanla birleştirilir: hiçbiri düşmez.
+  state.loadingId = id;
+  state.pendingLogs = [];
   const data = await attempt(() => api.loadJob(id));
+  if (state.loadingId !== id) return; // bu arada başka bir iş açıldı
+  state.loadingId = null;
+  const pending = state.pendingLogs;
+  state.pendingLogs = [];
   if (!data) return;
   state.followId = id;
   state.job = data.job;
-  state.logs = data.logs || [];
+  const key = (e) => `${e.t}|${e.src}|${e.text}`;
+  const have = new Set((data.logs || []).map(key));
+  state.logs = [...(data.logs || []), ...pending.filter((e) => !have.has(key(e)))];
+  state.folds = new Map();
   state.shots = (data.job.shots || []).filter((s) => s.dataUrl);
   state.openTasks = new Set();
   state.skip = new Set((data.job.tasks || []).filter((t) => t.status === 'skipped').map((t) => t.id));

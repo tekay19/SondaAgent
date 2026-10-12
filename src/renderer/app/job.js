@@ -99,7 +99,28 @@ function weaveHtml(job) {
     .join('')}</span>`;
 }
 
+// Katlanır bölümün kimliği: başlığın metni (veri yeniden çizilince kullanıcının açtığı bölüm açık kalsın).
+const foldId = (title) => String(title).replace(/<[^>]*>/g, '').trim().slice(0, 60);
+
 function renderPlanContent() {
+  buildPlanContent();
+  applyFolds();
+}
+
+// Kullanıcının açıp kapadığı katlanır bölümler yeniden çizimde korunur (içerik, veri değişince baştan kurulur).
+function applyFolds() {
+  for (const d of $$('#planContent details[data-fold]')) {
+    const want = state.folds.get(d.dataset.fold);
+    if (want !== undefined && d.open !== want) d.open = want;
+  }
+}
+// `toggle` olayı yükselmez: yakalama aşamasında dinlenir.
+$('#planContent').addEventListener('toggle', (e) => {
+  const d = e.target;
+  if (d?.dataset?.fold) state.folds.set(d.dataset.fold, d.open);
+}, true);
+
+function buildPlanContent() {
   const job = state.job;
   const key = JSON.stringify([job.id, job.phase, job.plan?.projectName, job.tasks, job.gates, job.finalReview, job.userNotes, job.audits, job.findings, job.reqStatus, job.discovery?.productBrief?.length, job.planCritique?.summary, job.planReview?.rounds?.length, job.plan?.maintenance?.summary, job.kind, [...state.openTasks], [...state.skip], busyHere(), state.summaryOpen]);
   if (key === state.contentKey) return;
@@ -127,14 +148,14 @@ function renderPlanContent() {
   }
   const p = job.plan;
   const approving = job.phase === 'awaiting_approval' && !busyHere();
-  const fold = (title, inner, count, open) => `<details class="fold" ${open ? 'open' : ''}><summary>${title}${count != null ? ` <span class="count">${count}</span>` : ''}</summary>${inner}</details>`;
+  const fold = (title, inner, count, open) => `<details class="fold" data-fold="${esc(foldId(title))}" ${open ? 'open' : ''}><summary>${title}${count != null ? ` <span class="count">${count}</span>` : ''}</summary>${inner}</details>`;
   // Bulgu defteri: doğrulanmış her kusurun akıbeti (açık / doğrulanamadı / düzeltildi).
   const ledger = job.findings || [];
   const lOpen = ledger.filter((f) => f.status === 'open');
   const lUnc = ledger.filter((f) => f.status === 'uncertain');
   const lFixed = ledger.filter((f) => f.status === 'fixed');
   const AREA = { security: 'güvenlik', logic: 'iş kuralları', quality: 'mimari/test', manager: 'ilk inceleme', audit: 'bağımsız denetim' };
-  const ledgerRow = (f, cls) => `<li class="lf ${cls}"><span class="badge ${cls === 'open' ? (['critical', 'high'].includes(f.severity) ? 'err' : 'warn') : cls === 'fixed' ? 'ok' : ''}">${esc(f.id)} · ${esc(f.severity)}</span> <b>${esc(f.title)}</b> <span class="lf-meta">${esc(AREA[f.area] || f.area || '')}${f.file ? ` · ${esc(f.file)}${f.line ? `:${f.line}` : ''}` : ''} · ${esc(f.label || '')}</span>${f.note ? `<div class="lf-note">${esc(f.note)}</div>` : ''}</li>`;
+  const ledgerRow = (f, cls) => `<li class="lf ${cls}"><span class="badge ${cls === 'open' ? (['critical', 'high'].includes(f.severity) ? 'err' : 'warn') : cls === 'fixed' ? 'ok' : ''}">${esc(f.id)} · ${esc(f.severity)}</span> <b>${esc(f.title)}</b> <span class="lf-meta">${esc(AREA[f.area] || f.area || '')}${f.file ? ` · ${esc(f.file)}${f.line ? `:${esc(f.line)}` : ''}` : ''} · ${esc(f.label || '')}</span>${f.note ? `<div class="lf-note">${esc(f.note)}</div>` : ''}</li>`;
   const ledgerHtml = ledger.length
     ? fold(
         `Bulgu defteri <span class="count">${lFixed.length} düzeltildi${lOpen.length ? ` · ${lOpen.length} açık` : ''}${lUnc.length ? ` · ${lUnc.length} doğrulanamadı` : ''}</span>`,
@@ -168,7 +189,7 @@ function renderPlanContent() {
             return `<h5 class="mini-h">Denetim ${a.n} · ${after}. görevden sonra${a.status !== 'done' ? ' · sürüyor' : a.error ? ` · ${esc(a.error)}` : ''}</h5>${a.summary ? `<p class="summary-text">${esc(a.summary)}</p>` : ''}${(a.suggestions || []).length ? `<ul class="ledger">${a.suggestions
               .map((x) => {
                 const [cls, label] = auditState(x);
-                return `<li class="lf ${cls === 'ok' ? 'fixed' : ''}"><span class="badge ${cls}">${esc(x.ledgerId ? `${x.ledgerId} · ` : '')}${esc(label)}</span> <b>${esc(x.title)}</b> <span class="lf-meta">${esc(x.severity)}${x.file ? ` · ${esc(x.file)}${x.line ? `:${x.line}` : ''}` : ''}${x.before ? ` · ${esc(x.before)} öncesi` : ''}</span>${x.verifyNote && x.verdict !== 'confirmed' ? `<div class="lf-note">${esc(x.verifyNote)}</div>` : ''}</li>`;
+                return `<li class="lf ${cls === 'ok' ? 'fixed' : ''}"><span class="badge ${cls}">${esc(x.ledgerId ? `${x.ledgerId} · ` : '')}${esc(label)}</span> <b>${esc(x.title)}</b> <span class="lf-meta">${esc(x.severity)}${x.file ? ` · ${esc(x.file)}${x.line ? `:${esc(x.line)}` : ''}` : ''}${x.before ? ` · ${esc(x.before)} öncesi` : ''}</span>${x.verifyNote && x.verdict !== 'confirmed' ? `<div class="lf-note">${esc(x.verifyNote)}</div>` : ''}</li>`;
               })
               .join('')}</ul>` : a.status === 'done' && !a.error ? '<p class="summary-text">Temeller sağlam; öneri yok.</p>' : ''}`;
           })
@@ -193,7 +214,7 @@ function renderPlanContent() {
         const tasksDone = (job.tasks || []).filter((t) => t.status === 'done').length;
         const tasksAll = (job.tasks || []).filter((t) => t.status !== 'skipped').length;
         const dur = job.startedAt && job.finishedAt ? fmtDur(job.finishedAt - job.startedAt) : '';
-        const parts = [`${tasksDone}/${tasksAll} görev`, final.qualityScore != null ? `kalite ${final.qualityScore}/10` : '', reqs.length ? `${met}/${reqs.length} gereksinim` : '', dur].filter(Boolean);
+        const parts = [`${tasksDone}/${tasksAll} görev`, final.qualityScore != null ? `kalite ${esc(final.qualityScore)}/10` : '', reqs.length ? `${met}/${reqs.length} gereksinim` : '', dur].filter(Boolean);
         return `<div class="delivered ${ok ? '' : 'incomplete'}">
             <svg class="kilim-band" aria-hidden="true"><rect width="100%" height="100%" fill="url(#kilimPattern)"/></svg>
             <div class="delivered-title"><svg class="ico seal" aria-hidden="true"><use href="#i-${ok ? 'seal' : 'alert'}"/></svg>${ok ? (job.kind ? `${KIND_LABEL[job.kind]} tamamlandı` : 'Teslime hazır') : `${job.kind ? 'Tamamlanamadı' : 'Teslime hazır değil'} — ${(final.issues || []).length} açık sorun`}</div>
@@ -213,7 +234,7 @@ function renderPlanContent() {
       ${p.maintenance ? maintenanceHtml(p.maintenance) : ''}
       ${final ? `<div class="sec final-box">
         <div class="sec-title">Son inceleme</div>
-        <div class="score">${final.qualityScore ?? '–'}<small> /10 kalite · ${final.verdict === 'pass' ? `${stIcon('done')} Onaylandı` : 'açık sorunlar var'}</small></div>
+        <div class="score">${esc(final.qualityScore ?? '–')}<small> /10 kalite · ${final.verdict === 'pass' ? `${stIcon('done')} Onaylandı` : 'açık sorunlar var'}</small></div>
         <p class="summary-text" style="margin-top:6px">${esc(final.summary)}</p>
         ${final.issues?.length ? `<ul class="bullets" style="margin-top:6px">${final.issues.map((i) => `<li>${esc(i)}</li>`).join('')}</ul>` : ''}
         ${final.deep ? `<div class="sec-line">${ico('search')} Derin inceleme: <span class="badge ${final.deep.verdict === 'pass' ? 'ok' : 'warn'}">${final.deep.verdict === 'pass' ? 'onay' : 'düzeltme'}</span> <span title="${esc(final.deep.summary)}">${esc((final.deep.summary || '').slice(0, 90))}</span></div>` : ''}
@@ -271,7 +292,7 @@ function maintenanceHtml(m) {
   const feat = m.kind === 'feature';
   const items = [...(m.findings || [])].sort((a, b) => (order[a.severity] ?? 9) - (order[b.severity] ?? 9));
   const sevClass = (f) => (feat ? '' : ['critical', 'high'].includes(f.severity) ? 'err' : f.severity === 'medium' ? 'warn' : '');
-  const fold = (title, inner, count) => `<details class="fold finding"><summary><b>${title}</b> <span class="count">${count}</span></summary>${inner}</details>`;
+  const fold = (title, inner, count) => `<details class="fold finding" data-fold="${esc(foldId(title))}"><summary><b>${title}</b> <span class="count">${count}</span></summary>${inner}</details>`;
   return `<div class="sec maint-box">
       <div class="sec-title">${feat ? 'Özellik tasarımı' : m.kind === 'bugfix' ? 'Teşhis' : 'Kod sağlığı analizi'} <span class="count">${items.length} ${feat ? 'tasarım kararı' : 'bulgu'}</span></div>
       ${m.request ? `<div class="maint-request" title="Senin isteğin">${esc(m.request)}</div>` : ''}
@@ -280,7 +301,7 @@ function maintenanceHtml(m) {
       ${feat && m.newRequirements?.length ? fold('Yeni gereksinimler', `<div class="f-detail">${m.newRequirements.map((r) => `<div class="req"><span class="rq">${stIcon('pending')}</span><b>${esc(r.id)}</b><span>${esc(r.text)}</span></div>`).join('')}</div>`, m.newRequirements.length) : ''}
       ${feat && m.assumptions?.length ? fold('Varsayımlar', `<ul class="bullets f-detail">${m.assumptions.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>`, m.assumptions.length) : ''}
       ${items
-      .map((f) => `<details class="fold finding">
+      .map((f) => `<details class="fold finding" data-fold="${esc(`f:${foldId(f.title)}`)}">
           <summary>${feat ? `<span class="badge" title="Mevcut davranış için risk">risk: ${SEV_LABEL[f.severity] || esc(f.severity)}</span>` : `<span class="badge ${sevClass(f)}">${SEV_LABEL[f.severity] || esc(f.severity)}</span>`}${m.kind === 'refactor' ? `<span class="badge">${FINDING_LABEL[f.type] || esc(f.type)}</span>` : ''}<b>${esc(f.title)}</b></summary>
           <div class="md brief f-detail">${md(f.detail || '')}</div>
           ${(f.files || []).length ? `<div class="f-files">${f.files.slice(0, 6).map((x) => `<code>${esc(x)}</code>`).join(' ')}</div>` : ''}
@@ -328,7 +349,7 @@ function tasksHtml(job, approving) {
         : !gate
           ? '<span class="badge" title="Faz bitince tam doğrulama + regresyon incelemesi">kapı</span>'
           : gate.status === 'passed'
-            ? `<span class="badge ok" title="${esc(gate.review?.summary || '')}${gate.review?.deep ? ` · Derin inceleme: ${esc(gate.review.deep.summary)}` : ''}${gate.review?.panel ? ` · Uzman paneli: ${(gate.review.panel.confirmed || []).length} doğrulanmış bulgu, ${gate.review.panel.rejected || 0} yanlış alarm elendi` : ''}">kapı ${stIcon('done')} ${gate.review?.qualityScore ?? ''}</span>`
+            ? `<span class="badge ok" title="${esc(gate.review?.summary || '')}${gate.review?.deep ? ` · Derin inceleme: ${esc(gate.review.deep.summary)}` : ''}${gate.review?.panel ? ` · Uzman paneli: ${(gate.review.panel.confirmed || []).length} doğrulanmış bulgu, ${gate.review.panel.rejected || 0} yanlış alarm elendi` : ''}">kapı ${stIcon('done')} ${esc(gate.review?.qualityScore ?? '')}</span>`
             : gate.status === 'failed'
               ? `<span class="badge err" title="${esc(gate.review?.summary || '')}">kapı ${stIcon('failed')}</span>`
               : '<span class="badge warn">kapı…</span>';
@@ -372,18 +393,18 @@ function taskHtml(t, i, approving) {
   const badges = [];
   if (t.kind && state.job.kind === 'refactor') badges.push(`<span class="badge">${FINDING_LABEL[t.kind] || esc(t.kind)}</span>`);
   if (label && !approving) badges.push(`<span class="badge ${t.status === 'failed' ? 'err' : t.status === 'fixing' ? 'warn' : ''}">${label}${t.status === 'fixing' && t.attempts ? ` ${t.attempts}` : ''}</span>`);
-  if (t.review?.qualityScore && t.status === 'done') badges.push(`<span class="badge ${t.review.qualityScore >= 8 ? 'ok' : t.review.qualityScore >= 6 ? '' : 'warn'}" title="${esc(t.review.scoreNote || 'Kalite puanı (ilk inceleme; doğrulanmış bulgularla sınırlanır)')}">${t.review.qualityScore}/10</span>`);
+  if (t.review?.qualityScore && t.status === 'done') badges.push(`<span class="badge ${t.review.qualityScore >= 8 ? 'ok' : t.review.qualityScore >= 6 ? '' : 'warn'}" title="${esc(t.review.scoreNote || 'Kalite puanı (ilk inceleme; doğrulanmış bulgularla sınırlanır)')}">${esc(t.review.qualityScore)}/10</span>`);
   if (t.review?.panel?.confirmed?.length && t.status !== 'running') badges.push(`<span class="badge ${t.review.panel.blocking ? 'err' : 'warn'}" title="${esc(t.review.panel.confirmed.map((f) => `[${f.severity}] ${f.title}`).join('\n'))}">${t.review.panel.confirmed.length} uzman bulgusu</span>`);
   if (t.agentMinutes && t.status !== 'running') badges.push(`<span class="badge" title="Ajanın kodlama süresi">${t.agentMinutes} dk</span>`);
   if (t.attempts && t.status !== 'fixing') badges.push(`<span class="badge" title="Düzeltme turu">${ico('refresh')}${t.attempts}</span>`);
   const lead = approving
-    ? `<input type="checkbox" data-skip="${t.id}" ${skipped ? '' : 'checked'} aria-label="Görevi dahil et" />`
+    ? `<input type="checkbox" data-skip="${esc(t.id)}" ${skipped ? '' : 'checked'} aria-label="Görevi dahil et" />`
     : `<span class="status-ic ${icCls}">${ic}</span>`;
   const review = t.review
     ? `<h5>İnceleme</h5><div class="review-box">${esc(t.review.summary)}${t.review.scoreNote ? `<div class="hint" style="margin-top:4px">${esc(t.review.scoreNote)}</div>` : ''}${t.review.panel ? `<div class="hint" style="margin-top:4px">${ico('panel')} Uzman incelemesi: ${t.review.panel.confirmed?.length ? `${t.review.panel.confirmed.length} doğrulanmış bulgu` : 'doğrulanmış bulgu yok'}${t.review.panel.rejected ? ` · ${t.review.panel.rejected} yanlış alarm elendi` : ''}</div>` : ''}${riskLine(t.review)}${t.review.testQuality ? `<div class="hint" style="margin-top:4px">${ico('flask')} ${esc(t.review.testQuality)}</div>` : ''}${openOfTask(t).length ? `<div class="hint warn-text" style="margin-top:4px">${ico('panel')} ${openOfTask(t).length} doğrulanmış bulgu hâlâ açık (bulgu defterinde); faz kapısı bunlar düzelmeden geçilemez.</div>` : ''}${t.review.deep ? `<div class="hint" style="margin-top:4px">${ico('search')} Derin inceleme: ${esc(t.review.deep.summary)}</div>` : ''}${t.review.issues?.length ? `<ul class="bullets">${t.review.issues.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}</div>`
     : '';
-  return `<li class="task ${open ? 'open' : ''} ${current ? 'current' : ''} ${skipped ? 'skipped' : ''}" data-task="${t.id}">
-      <div class="task-head">${lead}
+  return `<li class="task ${open ? 'open' : ''} ${current ? 'current' : ''} ${skipped ? 'skipped' : ''}" data-task="${esc(t.id)}">
+      <div class="task-head" tabindex="0" role="button" aria-expanded="${open}">${lead}
         <div class="task-main"><div class="task-title"><span class="task-num">${i + 1}</span>${esc(t.title)}</div><div class="task-goal">${esc(t.goal)}</div>${badges.length ? `<div class="task-meta">${badges.join('')}</div>` : ''}</div></div>
       <div class="task-body">
         <h5>Detaylar</h5><pre>${esc(t.details)}</pre>
@@ -391,7 +412,7 @@ function taskHtml(t, i, approving) {
         ${t.tests?.length ? `<h5>Yazılacak testler</h5><ul class="bullets">${t.tests.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
         ${t.tddFiles?.length ? `<h5>TDD — önce yazılan testler</h5><div class="tags">${t.tddFiles.map((f) => `<span class="tag">${esc(f)}</span>`).join('')}</div>` : ''}
         ${t.covers?.length ? `<h5>Karşıladığı gereksinimler</h5><div class="tags">${t.covers.map((c) => `<span class="tag">${esc(c)}</span>`).join('')}</div>` : ''}
-        ${t.brief ? `<details class="fold"><summary>Teknik brif${t.briefBy ? ` (${esc(t.briefBy)})` : ''}</summary><div class="md brief">${md(t.brief)}</div></details>` : ''}
+        ${t.brief ? `<details class="fold" data-fold="${esc(`brief:${t.id}`)}"><summary>Teknik brif${t.briefBy ? ` (${esc(t.briefBy)})` : ''}</summary><div class="md brief">${md(t.brief)}</div></details>` : ''}
         ${review}
         ${t.agentSummary ? `<h5>Ajanın özeti</h5><div class="md" style="padding:0">${md(t.agentSummary)}</div>` : ''}
       </div></li>`;
@@ -425,6 +446,14 @@ $('#planContent').addEventListener('click', (e) => {
     state.openTasks.has(id) ? state.openTasks.delete(id) : state.openTasks.add(id);
     renderPlanContent();
   }
+});
+// Klavye: görev başlığı Enter / boşlukla açılıp kapanır.
+$('#planContent').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const head = e.target.closest('.task-head');
+  if (!head || e.target !== head) return;
+  e.preventDefault();
+  head.click();
 });
 
 // İptal edilmiş işte geri getirilecek bir şey var mı: hazır bir plan ya da cevaplanmamış sorular.
@@ -588,7 +617,7 @@ function reportCover(job) {
   const reqs = p.requirements || [];
   const met = reqs.filter((r) => (job.reqStatus || {})[r.id] === 'met').length;
   const date = new Date(job.finishedAt || Date.now()).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' });
-  const chips = [date, `${tasks.filter((t) => t.status === 'done').length}/${tasks.length} görev`, final.qualityScore != null ? `kalite ${final.qualityScore}/10` : '', reqs.length ? `${met}/${reqs.length} gereksinim` : ''].filter(Boolean);
+  const chips = [date, `${tasks.filter((t) => t.status === 'done').length}/${tasks.length} görev`, final.qualityScore != null ? `kalite ${esc(final.qualityScore)}/10` : '', reqs.length ? `${met}/${reqs.length} gereksinim` : ''].filter(Boolean);
   return `<header class="report-cover">
       <svg class="kilim-band" aria-hidden="true"><rect width="100%" height="100%" fill="url(#kilimPattern)"/></svg>
       <div class="rc-kicker">Teslim raporu</div>
@@ -599,7 +628,12 @@ function reportCover(job) {
 
 function renderDocs() {
   const job = state.job;
-  $('#report').innerHTML = job.report ? reportCover(job) + md(job.report) : emptyHtml('Rapor iş bitince görünür.');
+  // Rapor yalnızca değişince yeniden çizilir: okurken kaydırma konumu ve seçim her olayda sıfırlanmasın.
+  const reportKey = `${job.id}:${job.phase}:${(job.report || '').length}:${job.finishedAt || 0}:${job.finalReview?.qualityScore ?? ''}`;
+  if ($('#report').dataset.key !== reportKey) {
+    $('#report').dataset.key = reportKey;
+    $('#report').innerHTML = job.report ? reportCover(job) + md(job.report) : emptyHtml('Rapor iş bitince görünür.');
+  }
   if (job.plan) {
     const p = job.plan;
     const specKey = `${job.id}:${p.projectName}:${p.spec?.length}`;

@@ -19,17 +19,31 @@ function dirOf(id) {
 const saveTimers = new Map();
 const removed = new Set(); // silinen işler: gecikmeli yazma onları geri getirmesin
 
+// Geçmiş listesi önbelleği: özetler bir kez diskten okunur, sonra her kayıtta ve silmede bellekte güncellenir.
+// (Liste her iş olayında istenir; her seferinde tüm job.json dosyalarını okumak ana süreci kilitliyordu.)
+let summaries = null; // Map(id → özet)
+const summaryOf = (j) => ({ id: j.id, idea: j.idea, title: j.plan?.projectName || null, phase: j.phase, createdAt: j.createdAt, projectDir: j.projectDir, agent: j.agent, kind: j.kind || null });
+
 function writeJob(job) {
   saveTimers.delete(job.id);
   if (removed.has(job.id)) return;
   fs.mkdirSync(dirOf(job.id), { recursive: true });
   writeFileAtomic(path.join(dirOf(job.id), 'job.json'), JSON.stringify(job, null, 1));
+  summaries?.set(job.id, summaryOf(job));
 }
 
 function save(job, { immediate = false } = {}) {
   clearTimeout(saveTimers.get(job.id)?.timer);
   if (immediate) return writeJob(job);
-  saveTimers.set(job.id, { job, timer: setTimeout(() => writeJob(job), 400) });
+  const timer = setTimeout(() => {
+    // Zamanlayıcıdaki hata (disk dolu, izin) yakalanmazsa ana süreç düşerdi; bir sonraki kayıt yeniden dener.
+    try {
+      writeJob(job);
+    } catch (e) {
+      console.error(`[sonda] iş kaydı yazılamadı (${job.id}): ${e.message}`);
+    }
+  }, 400);
+  saveTimers.set(job.id, { job, timer });
 }
 
 // Loglar kısa aralıklarla toplu yazılır; yazmalar iş başına sıraya alınır (satır sırası bozulmaz).
@@ -95,41 +109,69 @@ function readJob(id) {
 }
 
 function list() {
-  let ids = [];
+  if (!summaries) {
+    let ids;
+    try {
+      ids = fs.readdirSync(root());
+    } catch {
+      return []; // kök henüz yok: bir sonraki çağrıda yeniden bakılır
+    }
+    summaries = new Map();
+    for (const id of ids) {
+      if (!validId(id)) continue;
+      try {
+        const j = readJob(id);
+        if (j?.id === id) summaries.set(id, summaryOf(j));
+      } catch {
+        /* bozuk kayıt */
+      }
+    }
+  }
+  return [...summaries.values()].sort((a, b) => b.createdAt - a.createdAt);
+}
+
+// Dosyanın sonundaki en çok `maxLines` satır: dosya sondan parça parça okunur (en çok `maxBytes`), tamamı belleğe
+// alınmaz. Baştaki yarım satır (ve bölünmüş olabilecek UTF-8 karakteri) atılır.
+function tailLines(file, maxLines, maxBytes = 16 * 1024 * 1024) {
+  let fd;
   try {
-    ids = fs.readdirSync(root());
+    fd = fs.openSync(file, 'r');
   } catch {
     return [];
   }
-  const out = [];
-  for (const id of ids) {
-    if (!validId(id)) continue;
-    try {
-      const j = readJob(id);
-      if (j?.id !== id) continue;
-      out.push({ id: j.id, idea: j.idea, title: j.plan?.projectName || null, phase: j.phase, createdAt: j.createdAt, projectDir: j.projectDir, agent: j.agent, kind: j.kind || null });
-    } catch {
-      /* bozuk kayıt */
+  try {
+    const parts = [];
+    let pos = fs.fstatSync(fd).size;
+    let newlines = 0;
+    let read = 0;
+    while (pos > 0 && newlines <= maxLines && read < maxBytes) {
+      const len = Math.min(256 * 1024, pos);
+      pos -= len;
+      const buf = Buffer.alloc(len);
+      fs.readSync(fd, buf, 0, len, pos);
+      parts.unshift(buf);
+      read += len;
+      for (let i = 0; i < len; i++) if (buf[i] === 10) newlines++;
     }
+    let text = Buffer.concat(parts).toString('utf8');
+    if (pos > 0) text = text.slice(text.indexOf('\n') + 1);
+    return text.split('\n').filter(Boolean).slice(-maxLines);
+  } finally {
+    fs.closeSync(fd);
   }
-  return out.sort((a, b) => b.createdAt - a.createdAt);
 }
 
-// Diske yazılmış loglar + henüz yazılmamış (bellekteki) satırlar.
+// Diske yazılmış loglar (dosyanın sonu) + henüz yazılmamış (bellekteki) satırlar.
 function readLogs(id, maxLogs = 4000) {
-  let logs = [];
-  try {
-    const lines = fs.readFileSync(logFile(id), 'utf8').trim().split('\n');
-    logs = lines.slice(-maxLogs).map((l) => {
+  const logs = tailLines(logFile(id), maxLogs)
+    .map((l) => {
       try {
         return JSON.parse(l);
       } catch {
         return null;
       }
-    }).filter(Boolean);
-  } catch {
-    /* log yok */
-  }
+    })
+    .filter(Boolean);
   const pending = logBuffers.get(id)?.buf || [];
   return pending.length ? [...logs, ...pending].slice(-maxLogs) : logs;
 }
@@ -179,7 +221,11 @@ function remove(id) {
   saveTimers.delete(id);
   clearTimeout(logBuffers.get(id)?.timer);
   logBuffers.delete(id);
+  summaries?.delete(id);
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
-module.exports = { save, appendLog, saveShot, list, load, read: readJob, readLogs, withShotData, latestWithPlan, remove, flushAll, validId, _setRoot: (dir) => (rootOverride = dir) };
+module.exports = { save, appendLog, saveShot, list, load, read: readJob, readLogs, withShotData, latestWithPlan, remove, flushAll, validId, _setRoot: (dir) => {
+  rootOverride = dir;
+  summaries = null;
+} };

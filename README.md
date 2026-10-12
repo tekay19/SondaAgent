@@ -193,6 +193,7 @@ npm run dist:win   # dist/Sonda Agent Setup <sürüm>.exe (Windows'ta çalışt�
 - Ajanların açık bıraktığı **sahipsiz** geliştirme süreçleri (ör. kapatılmamış dev sunucusu) temizlenir; kendi terminalinde, editöründe ya da başka bir ajan oturumunda çalışan süreçlere dokunulmaz.
 - Tarayıcı testi yalıtılmış, kalıcı olmayan bir oturumda çalışır: test edilen uygulama izin isteyemez, dosya indiremez, pencere açamaz; Basic Auth bilgisi yalnızca uygulamanın kendi adresine gönderilir.
 - Proje klasörüne dokunan arayüz eylemleri (klasörü aç, editörde aç, çalıştır, zip) işin kimliğiyle çağrılır; klasör ve komutlar kayıtlı işten okunur.
+- Arayüzden gelen klasör yolları (yeni iş başlatma, Anahtarlar penceresi) yalnızca bu oturumda "Klasör seç" ile seçilmiş, açılıştaki son proje ya da kayıtlı bir işin klasörü olabilir; başka bir klasör reddedilir.
 
 ## Sorun giderme
 

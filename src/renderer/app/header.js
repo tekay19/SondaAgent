@@ -6,10 +6,25 @@ import { openEnv } from './env.js';
 // ---------- sekmeler ----------
 function selectTab(tab) {
   state.tab = tab;
-  $$('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === tab));
+  $$('.tab').forEach((t) => {
+    const on = t.dataset.tab === tab;
+    t.classList.toggle('active', on);
+    t.setAttribute('aria-selected', String(on));
+    t.tabIndex = on ? 0 : -1;
+  });
   $$('.tab-pane').forEach((p) => p.classList.toggle('active', p.id === `tab-${tab}`));
 }
 $$('.tab').forEach((t) => t.addEventListener('click', () => selectTab(t.dataset.tab)));
+// Klavye: sekmeler arasında ok tuşlarıyla gezilir (tek bir sekme odak sırasındadır).
+$('.tabs').addEventListener('keydown', (e) => {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+  const tabs = $$('.tab');
+  const i = tabs.findIndex((t) => t.dataset.tab === state.tab);
+  const next = e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : (i + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+  e.preventDefault();
+  selectTab(tabs[next].dataset.tab);
+  tabs[next].focus();
+});
 
 // ---------- başlık eylemleri ----------
 $('#stopBtn').addEventListener('click', async () => {

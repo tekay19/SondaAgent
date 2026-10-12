@@ -122,7 +122,8 @@ $('#readiness').addEventListener('click', async (e) => {
   if (act === 'resumeJob') {
     const id = e.target.closest('[data-id]').dataset.id;
     await openJob(id);
-    if (state.job) await attempt(() => api.resume(state.job.id));
+    // İş açılamadıysa (ya da bu arada başka bir iş açıldıysa) yanlış iş sürdürülmesin.
+    if (state.followId === id && state.job?.id === id) await attempt(() => api.resume(id));
   }
   if (act === 'login') connectAgent(state.compose.agent);
   if (act === 'showlive') {

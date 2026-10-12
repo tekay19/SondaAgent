@@ -74,6 +74,9 @@ const state = {
   actionsKey: '',
   contentKey: '',
   summaryOpen: false,
+  folds: new Map(), // kullanıcının açıp kapadığı katlanır bölümler (yeniden çizimde korunur)
+  loadingId: null, // yüklenmekte olan iş (bkz. history.openJob)
+  pendingLogs: [], // yükleme sırasında gelen log satırları
   env: null,
   envDir: '',
   envPending: { set: {}, remove: new Set() },

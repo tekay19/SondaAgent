@@ -168,7 +168,7 @@
           <div class="job-title-wrap">
             <div class="job-title-row">
               <h2 id="jobTitle" class="job-title">—</h2>
-              <span id="phasePill" class="pill">—</span>
+              <span id="phasePill" class="pill" aria-live="polite">—</span>
             </div>
             <div id="jobSub" class="job-sub"></div>
           </div>
@@ -200,14 +200,14 @@
           </div>
           <div class="output-col panel">
             <div class="tabs" role="tablist">
-              <button class="tab active" data-tab="logs">Akış</button>
-              <button class="tab" data-tab="shots">Ekranlar <span id="shotCount" class="count"></span></button>
-              <button class="tab" data-tab="report">Rapor</button>
-              <button class="tab" data-tab="spec">Şartname</button>
-              <button class="tab" data-tab="memory" title="Sonda'nın proje hakkında hatırladıkları">Hafıza</button>
+              <button class="tab active" role="tab" aria-selected="true" aria-controls="tab-logs" id="tabbtn-logs" data-tab="logs">Akış</button>
+              <button class="tab" role="tab" aria-selected="false" aria-controls="tab-shots" id="tabbtn-shots" data-tab="shots">Ekranlar <span id="shotCount" class="count"></span></button>
+              <button class="tab" role="tab" aria-selected="false" aria-controls="tab-report" id="tabbtn-report" data-tab="report">Rapor</button>
+              <button class="tab" role="tab" aria-selected="false" aria-controls="tab-spec" id="tabbtn-spec" data-tab="spec">Şartname</button>
+              <button class="tab" role="tab" aria-selected="false" aria-controls="tab-memory" id="tabbtn-memory" data-tab="memory" title="Sonda'nın proje hakkında hatırladıkları">Hafıza</button>
             </div>
             <div class="tab-body">
-              <div id="tab-logs" class="tab-pane active">
+              <div id="tab-logs" class="tab-pane active" role="tabpanel" aria-labelledby="tabbtn-logs">
                 <div id="logFilters" class="filters">
                   <button class="filter active" data-f="all">Tümü</button>
                   <button class="filter" data-f="agent">Ajan</button>
@@ -217,10 +217,10 @@
                 </div>
                 <div id="logList" class="log-list"></div>
               </div>
-              <div id="tab-shots" class="tab-pane"><div id="shotGrid" class="shot-grid"></div></div>
-              <div id="tab-report" class="tab-pane"><div id="report" class="md report"></div></div>
-              <div id="tab-spec" class="tab-pane"><div id="spec" class="md"></div></div>
-              <div id="tab-memory" class="tab-pane"><div id="memory" class="md"></div></div>
+              <div id="tab-shots" class="tab-pane" role="tabpanel" aria-labelledby="tabbtn-shots"><div id="shotGrid" class="shot-grid"></div></div>
+              <div id="tab-report" class="tab-pane" role="tabpanel" aria-labelledby="tabbtn-report"><div id="report" class="md report"></div></div>
+              <div id="tab-spec" class="tab-pane" role="tabpanel" aria-labelledby="tabbtn-spec"><div id="spec" class="md"></div></div>
+              <div id="tab-memory" class="tab-pane" role="tabpanel" aria-labelledby="tabbtn-memory"><div id="memory" class="md"></div></div>
             </div>
           </div>
         </div>

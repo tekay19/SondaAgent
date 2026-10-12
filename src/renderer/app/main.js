@@ -22,6 +22,7 @@ api.onEvent((evt) => {
     refreshHistorySoon();
   } else if (evt.type === 'log') {
     if (evt.jobId === state.followId) appendLog(evt.entry);
+    else if (evt.jobId === state.loadingId) state.pendingLogs.push(evt.entry); // iş yüklenirken: sonra birleştirilir
   } else if (evt.type === 'shots') {
     if (evt.jobId === state.followId) {
       state.shots = evt.shots;
@@ -29,8 +30,12 @@ api.onEvent((evt) => {
     }
   } else if (evt.type === 'busy') {
     state.running = new Set(evt.running || []);
-    state.contentKey = '';
-    state.actionsKey = '';
+    // Yalnızca izlenen işin olayı görünümü baştan kurar: paralel başka bir işin başlaması ya da bitmesi, onay kutusuna
+    // yazılan metni silmesin.
+    if (evt.jobId === state.followId) {
+      state.contentKey = '';
+      state.actionsKey = '';
+    }
     if (state.job && state.view === 'job') renderJob();
     renderReadiness();
     renderHistory();

@@ -17,11 +17,15 @@ const secrets = require('./secrets');
 const envfile = require('./envfile');
 const archive = require('./archive');
 const { Orchestrator } = require('./orchestrator');
+const { jobEventThrottle, folderGuard } = require('./ipcutil');
 
 // Uygulama adı: ayarlar klasörü (~/Library/Application Support/Sonda Agent) ve şifreli anahtarın
 // anahtar zinciri kaydı bu ada bağlıdır. İlk sürümün ("Orkestra") verileri bir kez taşınır;
 // eski şifreli anahtar yeni adla çözülemeyeceği için Gemini anahtarı yeniden istenir.
 app.setName('Sonda Agent');
+
+// Not: taşıma tek kopya kilidinden ÖNCE yapılır — kilit dosyası kullanıcı veri klasörünü oluşturur ve sonra
+// "klasör yok" koşulu hiç sağlanmazdı.
 (() => {
   const current = app.getPath('userData');
   const legacy = path.join(app.getPath('appData'), 'Orkestra');
@@ -62,6 +66,10 @@ let sleepBlocker = null;
 function send(evt) {
   if (win && !win.isDestroyed()) win.webContents.send('sonda:event', evt);
 }
+// İş güncellemeleri seyreltilir (bkz. ipcutil): her biri işin tamamını taşır ve görünümü yeniden çizdirir.
+const jobEvents = jobEventThrottle(send);
+// Bildirimler bir yerde tutulur: macOS'ta çöp toplanan bildirimin tıklama işleyicisi kaybolur.
+const notices = new Set();
 
 function showWindow() {
   if (!win || win.isDestroyed()) return createWindow();
@@ -98,13 +106,19 @@ function onOrchEvent(o, evt) {
     send({ type: 'busy', jobId: o.job?.id || null, busy: evt.busy, running: runningIds() });
     return;
   }
-  send(evt);
+  if (evt.type === 'job') jobEvents.push(evt);
+  else send(evt);
   if (evt.type === 'job' && evt.job.phase !== lastPhase.get(evt.job.id)) {
     lastPhase.set(evt.job.id, evt.job.phase);
     const n = NOTIFY[evt.job.phase];
     if (n && Notification.isSupported() && !win?.isFocused()) {
       const note = new Notification({ title: `Sonda Agent · ${n[0]}`, body: `${evt.job.plan?.projectName || String(evt.job.idea || '').slice(0, 60)} — ${n[1]}` });
-      note.on('click', showWindow);
+      notices.add(note);
+      note.on('click', () => {
+        notices.delete(note);
+        showWindow();
+      });
+      note.on('close', () => notices.delete(note));
       note.show();
     }
   }
@@ -282,10 +296,9 @@ function handle(channel, fn) {
   });
 }
 
-const needDir = (dir) => {
-  if (typeof dir !== 'string' || !path.isAbsolute(dir)) throw new Error('Önce proje klasörünü seçin.');
-  return dir;
-};
+// Arayüzden gelen klasör yolları yalnızca seçilmiş ya da bilinen klasörler olabilir (bkz. ipcutil.folderGuard).
+const folders = folderGuard({ known: () => [...jobs.list().map((j) => j.projectDir), ...[...pool.values()].map((o) => o.job?.projectDir)] });
+const needDir = (dir) => folders.check(dir);
 const agentOf = (id) => {
   if (!Object.prototype.hasOwnProperty.call(agents.ADAPTERS, id)) throw new Error('Bilinmeyen ajan.');
   return agents.ADAPTERS[id];
@@ -311,8 +324,8 @@ nativeTheme.on('updated', () => {
 // ---------- Anahtarlar (.env) ----------
 // Arayüze yalnızca maskeli değerler gider. Kaydedince değerler projenin .env dosyasına yazılır.
 handle('env:get', (dir) => secrets.view(needDir(dir)));
-handle('env:save', ({ dir, set, remove } = {}) => {
-  needDir(dir);
+handle('env:save', ({ dir: raw, set, remove } = {}) => {
+  const dir = needDir(raw);
   secrets.update(dir, { set, remove });
   const written = secrets.sync(dir);
   for (const o of pool.values()) {
@@ -422,7 +435,9 @@ handle('dialog:folder', async () => {
     properties: ['openDirectory', 'createDirectory', 'promptToCreate'],
     defaultPath: settings.get().lastProjectDir || app.getPath('documents'),
   });
-  return r.canceled ? null : r.filePaths[0];
+  if (r.canceled) return null;
+  folders.allow(r.filePaths[0]);
+  return r.filePaths[0];
 });
 handle('dialog:docs', async () => {
   const r = await dialog.showOpenDialog(win, { title: 'Teknik doküman ekle', properties: ['openFile', 'multiSelections'], filters: docs.FILTERS });
@@ -483,9 +498,15 @@ handle('app:run', (id) => {
 handle('app:stop', () => stopApp());
 handle('app:status', () => (devServer ? { state: 'running', url: devServer.url, dir: devServer.dir } : { state: 'stopped' }));
 
-handle('job:plan', (args) => startNew(args?.projectDir, (o) => o.startPlanning(args)));
+handle('job:plan', (args) => {
+  const projectDir = needDir(args?.projectDir);
+  return startNew(projectDir, (o) => o.startPlanning({ ...args, projectDir }));
+});
 // Bitmiş / mevcut projede devam: özellik ekleme, hata düzeltme ya da refactor.
-handle('job:maintain', (args) => startNew(args?.projectDir, (o) => o.startMaintenance(args)));
+handle('job:maintain', (args) => {
+  const projectDir = needDir(args?.projectDir);
+  return startNew(projectDir, (o) => o.startMaintenance({ ...args, projectDir }));
+});
 handle('job:replan', ({ id, feedback } = {}) => act(id, (o) => o.replan(feedback)));
 handle('job:answer', ({ id, answers } = {}) => act(id, (o) => o.answerQuestions(answers)));
 handle('job:approve', ({ id, ...args } = {}) => act(id, (o) => o.approve(args)));
@@ -521,6 +542,7 @@ handle('jobs:delete', (id) => {
   jobs.remove(id);
   pool.delete(id);
   lastPhase.delete(id);
+  jobEvents.forget(id);
   return true;
 });
 
@@ -536,12 +558,15 @@ if (primary) {
     } catch (e) {
       console.error('[sonda] anahtarlar şifrelenemedi:', e.message);
     }
+    // Açılıştaki son proje klasörü (yeni iş ekranında seçili gelir) izinli klasörlerdendir.
+    folders.allow(settings.get().lastProjectDir);
     applyTheme();
     createWindow();
     app.on('activate', showWindow);
   });
 
-  // macOS geleneği: pencere kapanınca uygulama çalışmaya devam eder (Dock'tan açılır).
+  // Pencere kapanınca uygulama çıkar. (Çalışan iş varken pencereyi kapatmak onu yalnızca gizler — bkz. createWindow —
+  // bu yüzden buraya çalışan işle gelinmez; macOS'ta yine de iş sürüyorsa uygulama açık kalır.)
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin' || !runningOrchs().length) app.quit();
   });
