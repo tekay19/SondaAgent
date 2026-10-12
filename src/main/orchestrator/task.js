@@ -281,27 +281,31 @@ class Task {
       temperature: 0.2,
       maxOutputTokens: 32768,
     });
-    const [first, deep, recheck] = await this.together([
+    const checksOk = !checks.some((c) => !c.ok && !c.env);
+    // Uzmanlar kontrollerin geçtiği ilk turda bir kez çalışır (başarısız build'de önce o düzeltilir) — ilk incelemeyle
+    // PARALEL: ilk incelemenin sonucuna ihtiyaçları yok, yalnızca doğrulama aşaması onun bulgularını da alır.
+    // (Sırayla çalıştırmak her görevde dakikalarca bekletiyordu.)
+    const specialistsOn = !round.panelRan && checksOk && !!rid && s.reviewPanel !== false && changed.length > 0;
+    const [first, deep, recheck, outs] = await this.together([
       byAgent ? this.agentReview(task, { checks, changed, diff, tddNote, installed }) : geminiReview(),
       // Maksimum inceleme gücünde (ilk incelemeyi Gemini yapıyorsa) Claude da bağımsız derin inceleme yapar.
       !byAgent && s.reviewLevel === 'max' ? this.deepReview({ scope: `task "${task.title}"`, tasks: [task], reqIds: task.covers, checks, smoke: null }) : Promise.resolve(null),
       // Düzeltme turundan sonra: bu görevin açık bulguları güncel kodda yeniden doğrulanır (varsayım yok).
       mine.length && rid ? this.recheckFindings(mine, where) : Promise.resolve(null),
+      specialistsOn ? this.taskSpecialists(task, changed, rid) : Promise.resolve(null),
     ]);
     // Ajan incelemesi sonuç vermediyse (oturum hatası, biçimsiz yanıt) Gemini'ye düşülür.
     const raw = first || (byAgent ? await this.reviewFallback(geminiReview, checks) : first);
     const src = byAgent && first ? 'review' : 'gemini';
     let review = this.normalizeReview(raw, checks, res.ok ? {} : { forceIssue: `Ajan görevi tamamlayamadı: ${String(res.error).slice(0, 300)}` });
-    const checksOk = !checks.some((c) => !c.ok && !c.env);
-    // Uzman paneli: kontrollerin geçtiği ilk turda bir kez (başarısız build'de önce o düzeltilir). İlk incelemenin
-    // bulguları da aynı doğrulayıcıdan geçer; panel çalışmış olsa bile yeni bulgular doğrulanır.
+    // İlk incelemenin bulguları da aynı doğrulayıcıdan geçer; uzmanlar çalışmamış olsa bile yeni bulgular doğrulanır.
     const mf = this.managerFindings(review);
     let pnl = null;
-    if (!round.panelRan && checksOk && rid && s.reviewPanel !== false && changed.length > 0) {
+    if (specialistsOn) {
       round.panelRan = true;
-      pnl = await this.taskPanel(task, changed, { extra: mf });
+      pnl = await this.settleTaskPanel(outs, mf, rid);
     } else if (mf.length && rid) {
-      pnl = await this.taskPanel(task, changed, { extra: mf, specialists: false });
+      pnl = await this.settleTaskPanel(null, mf, rid);
     }
     review = this.mergeDeep(this.settleManager(review, pnl, mf, !!rid), deep);
     // Bu noktada "düzelt" kararı yalnızca nesnel/çekirdek nedenlere dayanır (bulgular aşağıda eklenir).

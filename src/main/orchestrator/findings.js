@@ -1,6 +1,5 @@
 // Bulgu defteri: doğrulanmış bulguların kaydı, düzeltme sonrası yeniden doğrulanması ve incelemeye katılması.
 // (Orchestrator sınıfının yöntemleri; bkz. index.js — `this` orkestratördür.)
-const settings = require('../settings');
 const agents = require('../agents');
 const panelLib = require('../panel');
 const P = require('../prompts');
@@ -32,9 +31,8 @@ class Findings {
     try {
       for (let i = 0; i < items.length; i += 15) {
         const payload = items.slice(i, i + 15).map((f) => ({ f, code: panelLib.codeExcerpt(dir, f.file, f.line, { radius: 30, maxChars: 4500 }) }));
-        const res = await this.runAgent(P.findingRecheckPrompt({ items: payload, lang: this.userLang() }), { mode: 'review', schema: P.FINDING_RECHECK_SCHEMA, agentId: rid, label: 'bulgu yeniden doğrulama', src: 'review', timeoutMin: 15, effort: settings.get().reviewEffort || undefined, quiet: true });
-        const out = res.structured || agents.jsonFromText(res.transcript || res.text);
-        if (!Array.isArray(out?.results) || !out.results.length) throw new Error('sonuç alınamadı');
+        const out = await this.reviewSession(P.findingRecheckPrompt({ items: payload, lang: this.userLang() }), { schema: P.FINDING_RECHECK_SCHEMA, agentId: rid, label: 'bulgu yeniden doğrulama', timeoutMin: 15, what: 'Bulgu yeniden doğrulama', valid: (o) => Array.isArray(o?.results) && o.results.length > 0 });
+        if (!out) throw new Error('sonuç alınamadı');
         const r = panelLib.ledgerApply(this.ledger(), out.results);
         for (const k of Object.keys(total)) total[k].push(...r[k]);
       }

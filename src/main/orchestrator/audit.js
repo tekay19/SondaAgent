@@ -83,19 +83,11 @@ class Audit {
     this.update({ phase: 'reviewing', currentTaskId: null });
     this.log('review', 'step', `Bağımsız denetim ${rec.n} (${who}): bitmiş kodun tamamı ve kalan ${upcoming.length} görev birlikte inceleniyor — sonraki görevlerin dayanacağı temeller, sessizce çalışmayan testler, görev sınırlarındaki kusurlar.`);
 
-    let out = null;
-    try {
-      const res = await this.withCleanTree(() => this.runAgent(P.auditPrompt({ job, upcoming, lang: this.userLang() }), { mode: 'review', schema: P.AUDIT_SCHEMA, agentId: rid, model: model || undefined, label, src: 'review', timeoutMin: 30, effort: 'high', quiet: true }));
-      out = res.structured || agents.jsonFromText(res.transcript || res.text);
-    } catch (e) {
-      this.checkAbort();
-      if (agents.AUTH_ERROR.test(e.message)) throw e;
-      this.log('review', 'warn', `Bağımsız denetim yapılamadı: ${e.message}`);
-    }
-    if (!Array.isArray(out?.suggestions)) {
+    const out = await this.withCleanTree(() => this.reviewSession(P.auditPrompt({ job, upcoming, lang: this.userLang() }), { schema: P.AUDIT_SCHEMA, agentId: rid, model: model || undefined, label, timeoutMin: 30, effort: 'high', what: 'Bağımsız denetim', valid: (o) => Array.isArray(o?.suggestions) }));
+    if (!out) {
       // Denetim sonuç vermediyse iş durmaz; bir sonraki denetim yine `auditEvery` görev sonra gelir.
       Object.assign(rec, { status: 'done', error: 'sonuç alınamadı', finishedAt: Date.now() });
-      if (out) this.log('review', 'warn', 'Bağımsız denetim sonuç vermedi; yapım sürüyor.');
+      this.log('review', 'warn', 'Bağımsız denetim sonuç vermedi; yapım sürüyor.');
       this.update({ phase: 'running' });
       return rec;
     }

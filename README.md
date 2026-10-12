@@ -219,8 +219,8 @@ src/main/
     planning.js        keşif, gereksinimler, şartname ve görev planı, onay
     maintenance.js     özellik ekleme / hata düzeltme / refactor analizi ve planı
     task.js            görev: taban, teknik brif, TDD, kodlama, doğrulama → inceleme → düzeltme
-    pipeline.js        hat: faz kapıları, son kabul, hafıza, rapor
-    review.js          inceleme sonucunun birleştirilmesi, derin inceleme, uzman paneli, doğrulayıcı
+    pipeline.js        hat: ortak inceleme turu, faz kapıları, son kabul, hafıza, rapor
+    review.js          inceleme oturumu yardımcısı, inceleme sonucunun birleştirilmesi, derin inceleme, uzman paneli, doğrulayıcı
     findings.js        bulgu defteri: kayıt, yeniden doğrulama, inceleme turunun birleştirilmesi
     audit.js           bağımsız denetim: her N görevde bütün kod + kalan görevler, doğrulama, uygulama, geri alma güvencesi
     shared.js          ortak sabitler
@@ -228,7 +228,8 @@ src/main/
     base · context · planning · task · review · specialists · maintenance · report · audit
   agents/            Claude Code / Codex: adapters (izinler, ayrıştırıcılar) · install · detect · run
   verify/            checks (lint/test/build) · browser (dev sunucusu, sayfa denetimleri) · fresh-clone
-  gemini.js          Gemini REST istemcisi (yeniden deneme, JSON şema çıktısı, model listesi)
+  llmcore.js         Gemini ve Claude istemcilerinin ortak çekirdeği: SSE akışı, zaman aşımı, iptal, yeniden deneme, JSON ayrıştırma
+  gemini.js          Gemini REST istemcisi (istek biçimi, bitiş kuralları, model listesi)
   anthropic.js       Claude API (Messages) istemcisi: yönetici olarak Gemini'nin yerine, aynı sözleşme (akış, araç çağrısıyla şema, görüntü)
   net.js             bağlantı yoklaması: kesintide beklenir, bağlantı gelince adım yeniden denenir
   models.js          Claude model kataloğu, varsayılan model (Opus 5.5), brif modeli (Fable 5.1)

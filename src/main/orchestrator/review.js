@@ -53,23 +53,15 @@ class Review {
     this.log('review', 'step', focus?.length
       ? `${agents.ADAPTERS[rid].label} yeniden doğrulama: ${scope} — yalnızca bildirdiği ${focus.length} sorunun giderildiğine ve kontrollerin geçtiğine bakıyor…`
       : `${agents.ADAPTERS[rid].label} derin inceleme: ${scope} (projede geziyor, testleri kendisi çalıştırıyor)…`);
-    let deep = null;
-    try {
-      const res = await this.runAgent(P.deepReviewPrompt({ job, scope, tasks, reqIds, checks, smoke, lang: this.userLang(), focus }), {
-        mode: 'review',
-        schema: P.DEEP_REVIEW_SCHEMA,
-        agentId: rid,
-        label: `${focus?.length ? 'yeniden doğrulama' : 'derin inceleme'} · ${scope}`,
-        src: 'review',
-        timeoutMin: focus?.length ? 12 : 25,
-        effort: settings.get().reviewEffort || undefined,
-      });
-      deep = await this.structuredFrom(res, P.DEEP_REVIEW_SCHEMA, 'Derin inceleme');
-      if (!deep) this.log('review', 'warn', `Derin inceleme sonucu alınamadı${res.error ? `: ${String(res.error).slice(0, 200)}` : ''}.`);
-    } catch (e) {
-      this.checkAbort();
-      this.log('review', 'warn', `Derin inceleme yapılamadı: ${e.message}`);
-    }
+    const deep = await this.reviewSession(P.deepReviewPrompt({ job, scope, tasks, reqIds, checks, smoke, lang: this.userLang(), focus }), {
+      schema: P.DEEP_REVIEW_SCHEMA,
+      agentId: rid,
+      label: `${focus?.length ? 'yeniden doğrulama' : 'derin inceleme'} · ${scope}`,
+      timeoutMin: focus?.length ? 12 : 25,
+      what: 'Derin inceleme',
+      convert: true,
+      quiet: false,
+    });
     if (deep) {
       const blocking = (deep.issues || []).filter((i) => i.blocking || ['critical', 'high'].includes(i.severity));
       this.log('review', deep.verdict === 'pass' && !blocking.length ? 'ok' : 'warn', `Derin inceleme: ${deep.verdict === 'pass' && !blocking.length ? 'ONAYLANDI' : 'DÜZELTME GEREKLİ'} — ${deep.summary}`);
@@ -79,98 +71,115 @@ class Review {
     return deep;
   }
 
-  // Uzman denetim paneli (yalnızca Claude): güvenlik, iş kuralları / veri bütünlüğü ve mimari / test
-  // uzmanları paralel ve salt okunur inceler; ayrı bir Claude doğrulayıcı her bulguyu kodda kontrol eder.
-  // Yalnızca doğrulanan bulgular düzeltmeye gider; yanlış alarmlar ajanın zamanını yemez.
-  async reviewPanel({ scope, depAudit = null }) {
-    const job = this.job;
-    const rid = this.reviewerId();
-    if (!rid) return null;
-    const lang = this.userLang();
-    const effort = settings.get().reviewEffort || undefined;
-    const keys = Object.keys(P.SPECIALISTS);
-    this.log('review', 'step', `Uzman denetim paneli (${agents.ADAPTERS[rid].label}): ${keys.map((k) => P.SPECIALISTS[k].label).join(' · ')} — ${scope}`);
-    const outs = await Promise.all(
-      keys.map(async (key) => {
-        const label = P.SPECIALISTS[key].label;
-        try {
-          const res = await this.runAgent(P.specialistPrompt({ job, key, scope, lang, depAudit }), { mode: 'review', schema: P.SPECIALIST_SCHEMA, agentId: rid, label: `uzman · ${label}`, src: 'review', timeoutMin: 20, effort, quiet: true });
-          const out = res.structured || agents.jsonFromText(res.transcript || res.text);
-          if (!Array.isArray(out?.findings)) this.log('review', 'warn', `${label}: sonuç alınamadı.`);
-          else this.log('review', 'info', `${label}: ${out.findings.length} bulgu — ${out.summary || ''}`);
-          return { key, out };
-        } catch (e) {
-          this.checkAbort();
-          this.log('review', 'warn', `${label} incelemesi yapılamadı: ${e.message}`);
-          return { key, out: null };
-        }
-      })
-    );
-    const findings = outs.flatMap(({ key, out }) => (Array.isArray(out?.findings) ? out.findings : []).map((f) => ({ ...f, area: key, ...panelLib.parseFileRef(f.file, f.line) })));
+  /**
+   * Salt okunur inceleme oturumu: yapılandırılmış sonuç ya da metinden ayrıştırılmış JSON (`convert`: şemaya uymayan
+   * yanıt Gemini'yle şemaya dönüştürülür, bkz. structuredFrom). Sonuç alınamazsa (`valid` geçmezse) uyarı yazıp null
+   * döner. İptal ve oturum (giriş) hataları yukarı taşınır: iş giriş olmadan süremez, arayüz "Giriş yap" düğmesini
+   * gösterir. Bütün inceleme oturumları (derin inceleme, uzmanlar, doğrulayıcı, denetim) bu yoldan geçer.
+   */
+  async reviewSession(prompt, { schema, agentId, label, timeoutMin, effort, model, what = label, valid = () => true, convert = false, quiet = true } = {}) {
+    try {
+      const res = await this.runAgent(prompt, {
+        mode: 'review',
+        schema,
+        agentId: agentId || this.reviewerId(),
+        label,
+        src: 'review',
+        timeoutMin,
+        effort: effort === undefined ? settings.get().reviewEffort || undefined : effort,
+        model,
+        quiet,
+      });
+      const out = convert ? await this.structuredFrom(res, schema, what) : res.structured || agents.jsonFromText(res.transcript || res.text);
+      if (!out || !valid(out)) {
+        this.log('review', 'warn', `${what}: sonuç alınamadı${res.error ? ` (${String(res.error).split('\n')[0].slice(0, 200)})` : ''}.`);
+        return null;
+      }
+      return out;
+    } catch (e) {
+      this.checkAbort();
+      if (agents.AUTH_ERROR.test(e.message)) throw e;
+      this.log('review', 'warn', `${what} yapılamadı: ${e.message}`);
+      return null;
+    }
+  }
+
+  // Uzman oturumlarını paralel ve salt okunur çalıştırır. Dönen: [{ key, out }] (out: { summary, findings, strengths } | null)
+  runSpecialists(keys, promptFor, { rid, timeoutMin }) {
+    return Promise.all(keys.map(async (key) => ({
+      key,
+      out: await this.reviewSession(promptFor(key), { schema: P.SPECIALIST_SCHEMA, agentId: rid, label: `uzman · ${P.SPECIALISTS[key].label}`, timeoutMin, what: P.SPECIALISTS[key].label, valid: (o) => Array.isArray(o?.findings) }),
+    })));
+  }
+
+  panelFindings(outs) {
+    return (outs || []).flatMap(({ key, out }) => (Array.isArray(out?.findings) ? out.findings : []).map((f) => ({ ...f, area: key, ...panelLib.parseFileRef(f.file, f.line) })));
+  }
+
+  /**
+   * Bulguları (uzmanların ve varsa ilk incelemenin) ayrı bir doğrulayıcıdan geçirir ve panel nesnesini kurar. Yalnızca
+   * doğrulanan bulgular düzeltmeye gider; yanlış alarmlar ajanın zamanını yemez.
+   * Dönen: { confirmed, uncertain, rejected, low, summaries }
+   */
+  async settlePanel(findings, outs, rid, { logLabel, max = 12 }) {
     const toVerify = findings.filter((f) => f.severity !== 'low');
     const verified = toVerify.length ? await this.verifyPanelFindings(toVerify, rid) : [];
-    const confirmed = verified.filter((f) => f.verdict === 'confirmed');
-    const uncertain = verified.filter((f) => f.verdict === 'uncertain');
-    const rejected = verified.filter((f) => f.verdict === 'rejected');
+    const by = (v) => verified.filter((f) => f.verdict === v);
+    const confirmed = by('confirmed');
+    const uncertain = by('uncertain');
+    const rejected = by('rejected');
     const severe = confirmed.filter((f) => SEVERE.has(f.severity)).length;
-    this.log('review', severe ? 'warn' : 'ok', `Uzman paneli: ${confirmed.length} doğrulanmış bulgu${severe ? ` (${severe} kritik/yüksek)` : ''}, ${rejected.length} yanlış alarm elendi${uncertain.length ? `, ${uncertain.length} belirsiz` : ''}.`);
-    for (const f of confirmed.slice(0, 12)) this.log('review', SEVERE.has(f.severity) ? 'warn' : 'dim', `✓ [${f.severity}] ${PANEL_LABELS[f.area]}: ${f.title} (${f.file || '?'}${f.line ? `:${f.line}` : ''})`);
+    this.log('review', severe ? 'warn' : 'ok', `${logLabel}: ${confirmed.length ? `${confirmed.length} doğrulanmış bulgu${severe ? ` (${severe} kritik/yüksek)` : ''}` : 'doğrulanmış bulgu yok'}${rejected.length ? `, ${rejected.length} yanlış alarm elendi` : ''}${uncertain.length ? `, ${uncertain.length} belirsiz` : ''}.`);
+    for (const f of confirmed.slice(0, max)) this.log('review', SEVERE.has(f.severity) ? 'warn' : 'dim', `✓ [${f.severity}] ${PANEL_LABELS[f.area] || f.area}: ${f.title} (${f.file || '?'}${f.line ? `:${f.line}` : ''})`);
     return {
       confirmed,
       uncertain,
       rejected,
       low: findings.filter((f) => f.severity === 'low'),
-      summaries: outs.map(({ key, out }) => ({ area: key, summary: out?.summary || '', strengths: out?.strengths || [] })),
+      summaries: (outs || []).map(({ key, out }) => ({ area: key, summary: out?.summary || '', strengths: out?.strengths || [] })),
     };
   }
 
-  // Görev sonu uzman incelemesi: güvenlik uzmanı her görevde; iş kuralları uzmanı görev riskliyse
-  // (para, yetki, eşzamanlılık, durum makinesi, webhook, zamanlayıcı…). Bulgular doğrulayıcıdan geçer.
-  // Amaç: hatayı faz sonunda değil, yazıldığı görevde yakalamak.
-  async taskPanel(task, changedFiles, { extra = [], specialists = true } = {}) {
+  // Uzman denetim paneli (yalnızca Claude): güvenlik, iş kuralları / veri bütünlüğü ve mimari / test
+  // uzmanları paralel ve salt okunur inceler; ayrı bir Claude doğrulayıcı her bulguyu kodda kontrol eder.
+  async reviewPanel({ scope, depAudit = null }) {
     const job = this.job;
     const rid = this.reviewerId();
     if (!rid) return null;
     const lang = this.userLang();
-    const effort = settings.get().reviewEffort || undefined;
-    // Uzmanlar çalışmayacaksa (panel bu görevde zaten çalıştı) yalnızca yönetici bulguları doğrulanır.
-    if (!specialists) {
-      const verified = extra.length ? await this.verifyPanelFindings(extra, rid) : [];
-      return this.joinPanel(null, verified);
-    }
+    const keys = Object.keys(P.SPECIALISTS);
+    this.log('review', 'step', `Uzman denetim paneli (${agents.ADAPTERS[rid].label}): ${keys.map((k) => P.SPECIALISTS[k].label).join(' · ')} — ${scope}`);
+    const outs = await this.runSpecialists(keys, (key) => P.specialistPrompt({ job, key, scope, lang, depAudit }), { rid, timeoutMin: 20 });
+    for (const { key, out } of outs) if (out) this.log('review', 'info', `${P.SPECIALISTS[key].label}: ${out.findings.length} bulgu — ${out.summary || ''}`);
+    return this.settlePanel(this.panelFindings(outs), outs, rid, { logLabel: 'Uzman paneli' });
+  }
+
+  /**
+   * Görev sonu uzman incelemesi (ilk incelemeyle PARALEL başlatılır): güvenlik ve iş kuralları uzmanı her görevde
+   * (kusurların çoğu "riskli" görünmeyen görevlerde de iş kuralı / hata yolu kusuruydu); mimari/test uzmanı iskelet
+   * görevinde (araç zinciri, test düzeni orada belirlenir), riskli görevlerde, refactor/özellik işlerinde ve azami
+   * inceleme seviyesinde. Amaç: hatayı faz sonunda değil, yazıldığı görevde yakalamak. Dönen: uzman çıktıları.
+   */
+  taskSpecialists(task, changedFiles, rid) {
+    const job = this.job;
+    const lang = this.userLang();
     const text = `${task.title} ${task.goal} ${task.details} ${(task.acceptance || []).join(' ')}`.toLowerCase();
     const risky = /(ödeme|payment|stripe|iyzico|para|money|fiyat|price|stok|stock|sipariş|order|yetki|auth|role|rol|izin|permission|admin|webhook|callback|kuyruk|queue|zamanlay|cron|schedule|tick|retry|tekrar|idempot|transaction|transaksiyon|eşzaman|concurren|lock|kilit|state machine|durum|status|limit|kota|quota|sayaç|counter|dnc|tenant|kiracı)/.test(text);
-    // Güvenlik ve iş kuralları uzmanı her görevde çalışır (kusurların çoğu "riskli" görünmeyen görevlerde de
-    // iş kuralı/hata yolu kusuruydu). Mimari/test uzmanı: iskelet görevinde (araç zinciri, test düzeni, temiz kurulum
-    // orada belirlenir), riskli görevlerde, refactor/özellik işlerinde ve azami inceleme seviyesinde.
     const first = !job.kind && job.tasks.indexOf(task) === 0;
     const withQuality = job.kind === 'refactor' || job.kind === 'feature' || first || risky || settings.get().reviewLevel === 'max';
     const keys = withQuality ? ['security', 'logic', 'quality'] : ['security', 'logic'];
     this.log('review', 'step', `Görev sonu uzman incelemesi (${agents.ADAPTERS[rid].label}): ${keys.map((k) => P.SPECIALISTS[k].label).join(' · ')}${job.kind ? '' : risky ? ' — görev riskli alanlara dokunuyor' : ''}`);
-    const outs = await Promise.all(
-      keys.map(async (key) => {
-        const label = P.SPECIALISTS[key].label;
-        try {
-          const res = await this.runAgent(P.taskSpecialistPrompt({ job, task, key, changedFiles, lang }), { mode: 'review', schema: P.SPECIALIST_SCHEMA, agentId: rid, label: `uzman · ${label}`, src: 'review', timeoutMin: 8, effort, quiet: true });
-          const out = res.structured || agents.jsonFromText(res.transcript || res.text);
-          if (!Array.isArray(out?.findings)) this.log('review', 'warn', `${label}: sonuç alınamadı.`);
-          return { key, out };
-        } catch (e) {
-          this.checkAbort();
-          this.log('review', 'warn', `${label} incelemesi yapılamadı: ${e.message}`);
-          return { key, out: null };
-        }
-      })
-    );
-    const findings = [...outs.flatMap(({ key, out }) => (Array.isArray(out?.findings) ? out.findings : []).map((f) => ({ ...f, area: key, ...panelLib.parseFileRef(f.file, f.line) }))), ...extra];
-    const toVerify = findings.filter((f) => f.severity !== 'low');
-    const verified = toVerify.length ? await this.verifyPanelFindings(toVerify, rid) : [];
-    const confirmed = verified.filter((f) => f.verdict === 'confirmed');
-    const rejected = verified.filter((f) => f.verdict === 'rejected');
-    const severe = confirmed.filter((f) => SEVERE.has(f.severity)).length;
-    this.log('review', severe ? 'warn' : 'ok', `Görev sonu incelemesi (uzmanlar${extra.length ? ' + ilk incelemenin bulguları' : ''}): ${confirmed.length ? `${confirmed.length} doğrulanmış bulgu${severe ? ` (${severe} kritik/yüksek)` : ''}` : 'doğrulanmış bulgu yok'}${rejected.length ? `, ${rejected.length} yanlış alarm elendi` : ''}.`);
-    for (const f of confirmed.slice(0, 8)) this.log('review', SEVERE.has(f.severity) ? 'warn' : 'dim', `✓ [${f.severity}] ${PANEL_LABELS[f.area]}: ${f.title} (${f.file || '?'}${f.line ? `:${f.line}` : ''})`);
-    return { confirmed, uncertain: verified.filter((f) => f.verdict === 'uncertain'), rejected, low: findings.filter((f) => f.severity === 'low'), summaries: outs.map(({ key, out }) => ({ area: key, summary: out?.summary || '', strengths: out?.strengths || [] })) };
+    return this.runSpecialists(keys, (key) => P.taskSpecialistPrompt({ job, task, key, changedFiles, lang }), { rid, timeoutMin: 8 });
+  }
+
+  // Görev sonu incelemenin doğrulama aşaması: uzman bulguları ve ilk incelemenin bulguları (`extra`) birlikte doğrulanır.
+  // Uzmanlar çalışmadıysa (panel bu görevde zaten çalıştı) yalnızca ilk incelemenin bulguları doğrulanır.
+  async settleTaskPanel(outs, extra, rid) {
+    if (!outs) {
+      const verified = extra.length ? await this.verifyPanelFindings(extra, rid) : [];
+      return this.joinPanel(null, verified);
+    }
+    return this.settlePanel([...this.panelFindings(outs), ...extra], outs, rid, { logLabel: `Görev sonu incelemesi (uzmanlar${extra.length ? ' + ilk incelemenin bulguları' : ''})`, max: 8 });
   }
 
   // Puan kanıtla düzeltilir: doğrulanmış uzman bulgusu varken 10/10 verilemez.
@@ -190,17 +199,13 @@ class Review {
     const dir = this.job.projectDir;
     const items = findings.map((f, i) => ({ i, f, code: panelLib.codeExcerpt(dir, f.file, f.line, { radius: 25, maxChars: 4000 }) }));
     this.log('review', 'info', `Doğrulayıcı (${agents.ADAPTERS[rid].label}) ${findings.length} bulguyu kodda tek tek kontrol ediyor…`);
-    try {
-      const res = await this.runAgent(P.panelVerifyPrompt({ items, lang: this.userLang(), decisive }), { mode: 'review', schema: P.PANEL_VERIFY_SCHEMA, agentId: rid, label: 'bulgu doğrulama', src: 'review', timeoutMin: 15, effort: settings.get().reviewEffort || undefined, quiet: true });
-      const out = res.structured || agents.jsonFromText(res.transcript || res.text);
-      const byIndex = new Map((out?.results || []).map((x) => [Number(x.index), x]));
-      if (!byIndex.size) throw new Error('doğrulama sonucu alınamadı');
-      return findings.map((f, i) => ({ ...f, verdict: byIndex.get(i)?.verdict || 'uncertain', verifyNote: byIndex.get(i)?.reason || '' }));
-    } catch (e) {
-      this.checkAbort();
-      this.log('review', 'warn', `Bulgular doğrulanamadı (${e.message}); yalnızca kritik/yüksek olanlar dikkate alınıyor.`);
+    const out = await this.reviewSession(P.panelVerifyPrompt({ items, lang: this.userLang(), decisive }), { schema: P.PANEL_VERIFY_SCHEMA, agentId: rid, label: 'bulgu doğrulama', timeoutMin: 15, what: 'Bulgu doğrulama', valid: (o) => (o?.results || []).length > 0 });
+    if (!out) {
+      this.log('review', 'warn', 'Bulgular doğrulanamadı; yalnızca kritik/yüksek olanlar dikkate alınıyor.');
       return findings.map((f) => ({ ...f, verdict: SEVERE.has(f.severity) ? 'confirmed' : 'uncertain', verifyNote: 'doğrulanamadı' }));
     }
+    const byIndex = new Map(out.results.map((x) => [Number(x.index), x]));
+    return findings.map((f, i) => ({ ...f, verdict: byIndex.get(i)?.verdict || 'uncertain', verifyNote: byIndex.get(i)?.reason || '' }));
   }
 
   // Düzeltme turundan sonra hedefli yeniden doğrulamaya girecek maddeler: engelleyici sorunlar,
@@ -364,30 +369,18 @@ class Review {
     const rid = this.reviewerId();
     if (!rid) return null;
     this.log('review', 'step', `${agents.ADAPTERS[rid].label} görevi bağımsız inceliyor: kodu geziyor, testleri çalıştırıyor, değişikliği kırmayı deniyor…`);
-    try {
-      const res = await this.runAgent(P.taskReviewPrompt({ job: this.job, task, agentSummary: task.agentSummary, checks, changed, diffStat: diff?.stat, tddNote, installed, lang: this.userLang() }), {
-        mode: 'review',
-        schema: P.AGENT_REVIEW_SCHEMA,
-        agentId: rid,
-        label: `inceleme · ${task.title}`,
-        src: 'review',
-        timeoutMin: 20,
-        effort: settings.get().reviewEffort || undefined,
-        quiet: true,
-      });
-      const out = await this.structuredFrom(res, P.AGENT_REVIEW_SCHEMA, 'İnceleme');
-      if (!out || !['pass', 'fix'].includes(out.verdict)) {
-        this.log('review', 'warn', `İnceleme sonucu alınamadı${res.error ? `: ${String(res.error).split('\n')[0].slice(0, 200)}` : ''}.`);
-        return null;
-      }
-      for (const t of (out.testsRun || []).slice(0, 8)) this.log('review', t.result === 'fail' ? 'warn' : 'dim', `test: ${t.command} → ${t.result}${t.note ? ` · ${t.note}` : ''}`);
-      return out;
-    } catch (e) {
-      this.checkAbort();
-      if (agents.AUTH_ERROR.test(e.message)) throw e;
-      this.log('review', 'warn', `İnceleme oturumu başarısız: ${e.message}`);
-      return null;
-    }
+    const out = await this.reviewSession(P.taskReviewPrompt({ job: this.job, task, agentSummary: task.agentSummary, checks, changed, diffStat: diff?.stat, tddNote, installed, lang: this.userLang() }), {
+      schema: P.AGENT_REVIEW_SCHEMA,
+      agentId: rid,
+      label: `inceleme · ${task.title}`,
+      timeoutMin: 20,
+      what: 'İnceleme',
+      convert: true,
+      valid: (o) => ['pass', 'fix'].includes(o?.verdict),
+    });
+    if (!out) return null;
+    for (const t of (out.testsRun || []).slice(0, 8)) this.log('review', t.result === 'fail' ? 'warn' : 'dim', `test: ${t.command} → ${t.result}${t.note ? ` · ${t.note}` : ''}`);
+    return out;
   }
 
   // Ajan incelemesi sonuç vermediğinde: Gemini anahtarı varsa Gemini inceler; yoksa karar yalnızca kontrollere dayanır.

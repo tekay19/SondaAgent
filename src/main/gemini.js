@@ -1,27 +1,15 @@
-// Gemini API istemcisi (REST + SSE akışı, SDK bağımlılığı yok).
-const https = require('https');
-const BASE = 'https://generativelanguage.googleapis.com/v1beta';
-const RETRY_STATUS = new Set([429, 500, 502, 503, 504]);
+// Gemini API istemcisi (REST + SSE akışı, SDK bağımlılığı yok). Akış, zaman aşımı ve yeniden deneme ortak
+// çekirdektedir (bkz. llmcore.js); burada yalnızca isteğin biçimi, olayların okunması ve bitiş kuralları var.
+const core = require('./llmcore');
 
-class GeminiError extends Error {
-  constructor(message, status) {
-    super(message);
-    this.status = status;
-  }
-}
+const BASE = 'https://generativelanguage.googleapis.com/v1beta';
+
+class GeminiError extends core.ApiError {}
+
+const makeError = (message, status, extra) => new GeminiError(message, status, extra);
 
 function modelId(model) {
   return String(model || '').replace(/^models\//, '').trim();
-}
-
-function sleep(ms, signal) {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(resolve, ms);
-    signal?.addEventListener('abort', () => {
-      clearTimeout(t);
-      reject(new Error('İptal edildi'));
-    }, { once: true });
-  });
 }
 
 async function request(url, { apiKey, method = 'GET', body, signal }) {
@@ -46,91 +34,15 @@ async function request(url, { apiKey, method = 'GET', body, signal }) {
 }
 
 /**
- * Akışlı (SSE) istek. Node'un fetch'i yanıt başlıkları için 5 dakika bekler; büyük planlar
- * daha uzun sürebildiği için https modülüyle kendi zaman aşımımızı (20 dk) kullanıyoruz.
- */
-function streamRequest(url, { apiKey, body, signal, onChunk, timeoutMs = 20 * 60 * 1000 }) {
-  return new Promise((resolve, reject) => {
-    let req;
-    try {
-      req = https.request(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey, Accept: 'text/event-stream' },
-      });
-    } catch (e) {
-      // Geçersiz başlık (ör. anahtarda bozuk karakter) ağ hatası değildir: tekrar deneme, hemen bildir.
-      reject(new GeminiError(`Gemini isteği oluşturulamadı: ${e.message}. Ayarlar'dan API anahtarını yeniden girin.`, 0));
-      return;
-    }
-    let settled = false;
-    const done = (fn, v) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', onAbort);
-      fn(v);
-    };
-    const timer = setTimeout(() => {
-      req.destroy();
-      done(reject, Object.assign(new GeminiError('Gemini zaman aşımı (20 dk)'), { status: 504 }));
-    }, timeoutMs);
-    const onAbort = () => {
-      req.destroy();
-      done(reject, new Error('İptal edildi'));
-    };
-    signal?.addEventListener('abort', onAbort, { once: true });
-
-    req.on('error', (e) => done(reject, Object.assign(new TypeError(`Gemini bağlantı hatası: ${e.message}`), { network: true })));
-    req.on('response', (res) => {
-      res.setEncoding('utf8');
-      if (res.statusCode >= 400) {
-        let raw = '';
-        res.on('data', (d) => (raw += d));
-        res.on('end', () => {
-          let msg = raw.slice(0, 400);
-          try {
-            msg = JSON.parse(raw).error?.message || msg;
-          } catch {
-            /* JSON değil */
-          }
-          done(reject, new GeminiError(`Gemini ${res.statusCode}: ${msg}`, res.statusCode));
-        });
-        return;
-      }
-      let buf = '';
-      const events = [];
-      res.on('data', (d) => {
-        buf += d;
-        let i;
-        while ((i = buf.indexOf('\n\n')) >= 0 || (i = buf.indexOf('\r\n\r\n')) >= 0) {
-          const block = buf.slice(0, i);
-          buf = buf.slice(i + (buf[i] === '\r' ? 4 : 2));
-          const data = block.split(/\r?\n/).filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trim()).join('');
-          if (!data) continue;
-          try {
-            const ev = JSON.parse(data);
-            events.push(ev);
-            onChunk?.(ev);
-          } catch {
-            /* yarım olay — yok say */
-          }
-        }
-      });
-      res.on('end', () => done(resolve, events));
-      res.on('error', (e) => done(reject, Object.assign(new TypeError(`Gemini akışı kesildi: ${e.message}`), { network: true })));
-    });
-    req.end(JSON.stringify(body));
-  });
-}
-
-/**
  * Gemini'ye istek atar. `schema` verilirse JSON döner ve ayrıştırılmış nesneyi verir.
  * parts: [{ text }] veya [{ inlineData: { mimeType, data } }]
- * onProgress(karakterSayısı) uzun yanıtlarda ilerleme bildirir.
+ * onProgress(karakterSayısı) uzun yanıtlarda ilerleme bildirir. onUsage(usageMetadata).
+ * Yalnızca STOP ile biten yanıt kullanılır: güvenlik / alıntı nedeniyle kesilen yanıt (yarım metinle) kabul edilmez;
+ * bitiş nedeni hiç gelmeden kapanan akış yarım sayılır ve yeniden denenir.
  */
-async function generate({ apiKey, model, system, parts, schema, temperature = 0.4, maxOutputTokens, signal, onUsage, onProgress }) {
+async function generate({ apiKey, model, system, parts, schema, temperature = 0.4, maxOutputTokens, signal, onUsage, onProgress, baseUrl = BASE, retryDelays, timeoutMs }) {
   if (!apiKey) throw new GeminiError('Gemini API anahtarı ayarlanmamış ya da kayıtlı anahtar okunamadı. Ayarlar\'dan girin.');
-  const url = `${BASE}/models/${encodeURIComponent(modelId(model))}:streamGenerateContent?alt=sse`;
+  const url = `${baseUrl.replace(/\/+$/, '')}/models/${encodeURIComponent(modelId(model))}:streamGenerateContent?alt=sse`;
   const body = {
     contents: [{ role: 'user', parts }],
     generationConfig: { temperature },
@@ -141,57 +53,61 @@ async function generate({ apiKey, model, system, parts, schema, temperature = 0.
     body.generationConfig.responseMimeType = 'application/json';
     body.generationConfig.responseSchema = schema;
   }
-
-  // Geçici hatalarda (429, 5xx, bağlantı) yaklaşık 4 dakikaya yayılan yeniden denemeler: saatler süren bir iş,
-  // Gemini'nin kısa bir kesintisi yüzünden düşmesin.
-  const delays = [3000, 10000, 30000, 60000, 120000];
   let orderingStripped = false;
-  for (let attempt = 0; ; attempt++) {
-    try {
-      let text = '';
-      let finishReason = null;
-      let blockReason = null;
-      let usage = null;
+
+  return core.withRetries(
+    async () => {
+      const acc = { text: '', finishReason: null, blockReason: null, usage: null };
       let lastReport = 0;
-      await streamRequest(url, {
-        apiKey,
+      await core.streamRequest(url, {
+        headers: { 'x-goog-api-key': apiKey },
         body,
         signal,
-        onChunk: (ev) => {
-          if (ev.usageMetadata) usage = ev.usageMetadata;
-          if (ev.promptFeedback?.blockReason) blockReason = ev.promptFeedback.blockReason;
+        timeoutMs,
+        label: 'Gemini',
+        makeError,
+        onEvent: (ev) => {
+          if (ev.usageMetadata) acc.usage = ev.usageMetadata;
+          if (ev.promptFeedback?.blockReason) acc.blockReason = ev.promptFeedback.blockReason;
           const cand = ev.candidates?.[0];
-          if (cand?.finishReason) finishReason = cand.finishReason;
-          for (const p of cand?.content?.parts || []) if (!p.thought && typeof p.text === 'string') text += p.text;
-          if (onProgress && text.length - lastReport > 4000) {
-            lastReport = text.length;
-            onProgress(text.length);
+          if (cand?.finishReason) acc.finishReason = cand.finishReason;
+          for (const p of cand?.content?.parts || []) if (!p.thought && typeof p.text === 'string') acc.text += p.text;
+          if (onProgress && acc.text.length - lastReport > 4000) {
+            lastReport = acc.text.length;
+            onProgress(acc.text.length);
           }
         },
       });
-      if (usage && onUsage) onUsage(usage);
-      if (finishReason === 'MAX_TOKENS') throw new GeminiError('Gemini yanıtı çıktı sınırına takıldı (MAX_TOKENS). Daha büyük çıktı destekleyen bir model seçin ya da isteği bölün.', 0);
-      if (!text) throw new GeminiError(`Gemini yanıt üretmedi (${blockReason || finishReason || 'boş yanıt'})`, 0);
-      return schema ? parseJson(text) : text;
-    } catch (err) {
-      if (signal?.aborted) throw new Error('İptal edildi');
-      // Bazı modeller yüksek maxOutputTokens değerini reddeder: sınırı kaldırıp tekrar dene.
-      if (err.status === 400 && body.generationConfig.maxOutputTokens && /output.?tokens/i.test(err.message)) {
-        delete body.generationConfig.maxOutputTokens;
-        continue;
+      if (acc.usage && onUsage) onUsage(acc.usage);
+      if (acc.finishReason === 'MAX_TOKENS') throw new GeminiError('Gemini yanıtı çıktı sınırına takıldı (MAX_TOKENS). Daha büyük çıktı destekleyen bir model seçin ya da isteği bölün.', 0);
+      if (acc.finishReason && acc.finishReason !== 'STOP') throw new GeminiError(`Gemini yanıtı tamamlanmadı (${acc.finishReason})${acc.text ? '; yarım yanıt kullanılmadı' : ''}`, 0);
+      if (!acc.finishReason) {
+        if (acc.blockReason) throw new GeminiError(`Gemini yanıt üretmedi (${acc.blockReason})`, 0);
+        throw new GeminiError('Gemini akışı bitiş nedeni olmadan sona erdi (yarım yanıt)', 0, { truncated: true });
       }
-      // Alan sırası (propertyOrdering) şemada isteğe bağlı bir ipucudur; onu tanımayan bir model/sürüm isteği
-      // reddederse şema sırasız gönderilir (iş bu yüzden durmaz).
-      if (err.status === 400 && body.generationConfig.responseSchema && !orderingStripped && /propertyOrdering|property_ordering|Unknown name|Invalid JSON payload/i.test(err.message)) {
-        body.generationConfig.responseSchema = withoutKey(body.generationConfig.responseSchema, 'propertyOrdering');
-        orderingStripped = true;
-        continue;
-      }
-      const retryable = RETRY_STATUS.has(err.status) || err instanceof TypeError || err instanceof SyntaxError;
-      if (!retryable || attempt >= delays.length) throw err;
-      await sleep(delays[attempt], signal);
+      if (!acc.text) throw new GeminiError('Gemini yanıt üretmedi (boş yanıt)', 0);
+      return schema ? core.parseJson(acc.text, 'Gemini') : acc.text;
+    },
+    {
+      signal,
+      delays: retryDelays,
+      adjust: (err) => {
+        // Bazı modeller yüksek maxOutputTokens değerini reddeder: sınırı kaldırıp tekrar dene.
+        if (body.generationConfig.maxOutputTokens && /output.?tokens/i.test(err.message)) {
+          delete body.generationConfig.maxOutputTokens;
+          return true;
+        }
+        // Alan sırası (propertyOrdering) şemada isteğe bağlı bir ipucudur; onu tanımayan bir model/sürüm isteği
+        // reddederse şema sırasız gönderilir (iş bu yüzden durmaz).
+        if (body.generationConfig.responseSchema && !orderingStripped && /propertyOrdering|property_ordering|Unknown name|Invalid JSON payload/i.test(err.message)) {
+          body.generationConfig.responseSchema = withoutKey(body.generationConfig.responseSchema, 'propertyOrdering');
+          orderingStripped = true;
+          return true;
+        }
+        return false;
+      },
     }
-  }
+  );
 }
 
 // Şemadan (iç içe) bir anahtarı çıkarır.
@@ -199,18 +115,6 @@ function withoutKey(node, key) {
   if (Array.isArray(node)) return node.map((x) => withoutKey(x, key));
   if (!node || typeof node !== 'object') return node;
   return Object.fromEntries(Object.entries(node).filter(([k]) => k !== key).map(([k, v]) => [k, withoutKey(v, key)]));
-}
-
-function parseJson(text) {
-  const cleaned = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
-  try {
-    return JSON.parse(cleaned);
-  } catch {
-    const start = cleaned.indexOf('{');
-    const end = cleaned.lastIndexOf('}');
-    if (start >= 0 && end > start) return JSON.parse(cleaned.slice(start, end + 1));
-    throw new SyntaxError('Gemini geçersiz JSON döndürdü');
-  }
 }
 
 async function listModels({ apiKey, signal }) {
@@ -254,7 +158,4 @@ function toGeminiSchema(schema) {
   return out;
 }
 
-// Bağlantı sorunu mu (internet / DNS yok, akış koptu, geçici ağ geçidi hatası)? Kota (429) ve model hataları değildir.
-const isNetworkError = (e) => e?.network === true || [502, 503, 504].includes(e?.status);
-
-module.exports = { withoutKey, generate, listModels, toGeminiSchema, isNetworkError };
+module.exports = { GeminiError, withoutKey, generate, listModels, toGeminiSchema, isNetworkError: core.isNetworkError };

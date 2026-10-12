@@ -179,6 +179,51 @@ class Pipeline {
     return checks;
   }
 
+  /**
+   * Bir inceleme turu (faz kapısı ve son kabul ortak): yönetici incelemesi, güvenlik denetimi, derin inceleme, uzman
+   * paneli ve açık bulguların yeniden doğrulanması paralel çalışır; sonuç settleRound ile birleştirilir.
+   * - managerLeads: karar yöneticinin incelemesinden gelir (son kabul; faz kapısında "her adımda" rolü). Değilse
+   *   karar derin incelemeden gelir; o da yoksa yöneticiye düşülür.
+   * - deep: { scope, tasks, reqIds }; düzeltme turlarında derin inceleme yalnızca bildirdiklerini doğrular, önceki turda
+   *   zaten onayladıysa hiç çalışmaz. panel yalnızca ilk turda çalışır.
+   * Dönen: { review, deep, src }
+   */
+  async reviewRound({ attempt, checks, smoke, prevDeep, deepOn, manager, managerLeads, security, deep: deepScope, panel, at, label, prevPanel }) {
+    const focus = attempt > 0 ? this.deepBlocking(prevDeep) : null;
+    const openNow = deepOn ? panelLib.ledgerOpen(this.ledger()) : [];
+    const deepTask = () => (!deepOn
+      ? Promise.resolve(null)
+      : attempt > 0 && prevDeep && !focus.length
+        ? Promise.resolve(prevDeep)
+        : this.deepReview({ ...deepScope, checks, smoke, focus }));
+    const [first, findings, deep, pnl, recheck] = await this.withCleanTree(() => this.together([
+      managerLeads ? manager() : Promise.resolve(null),
+      security ? security() : Promise.resolve([]),
+      deepTask(),
+      panel && attempt === 0 ? this.reviewPanel(panel) : Promise.resolve(null),
+      openNow.length ? this.recheckFindings(openNow, label) : Promise.resolve(null),
+    ]));
+    const raw = managerLeads ? first : deep ? this.neutralReview(deep) : await this.reviewFallback(manager, checks);
+    const src = !managerLeads && deep ? 'review' : 'gemini';
+    const review = await this.settleRound({
+      raw,
+      checks,
+      extra: { ...(smoke?.error ? { forceIssue: `Uygulama çalıştırılamadı: ${smoke.error}` } : {}), forceIssues: this.smokeIssues(smoke) },
+      security: findings,
+      deep,
+      panel: pnl,
+      recheck,
+      openBefore: openNow,
+      at,
+      label,
+      canVerify: deepOn,
+      // Düzeltme turlarında panel yeniden çalışmaz; özeti arayüzde kalsın (engelleyiciliği yeniden doğrulama belirler).
+      prevPanel,
+      keepPrev: attempt > 0,
+    });
+    return { review, deep, src };
+  }
+
   // Faz kalite kapısı: tüm kontroller + entegrasyon/e2e + tarayıcı testi + regresyon incelemesi.
   async runPhaseGate(phaseName, s) {
     const job = this.job;
@@ -208,49 +253,28 @@ class Pipeline {
       const phaseTasks = job.tasks.filter((t) => t.phase === phaseName && t.status !== 'skipped');
       const deepOn = s.reviewLevel !== 'standard';
       const installed = project.installedVersions(dir);
-      // Düzeltme turlarında Claude fazı baştan incelemez: yalnızca bildirdiği sorunları doğrular;
-      // önceki turda zaten onayladıysa hiç çalışmaz.
-      const prevBlocking = this.deepBlocking(prevDeep);
-      // Uzman paneli ilk turda çalışır; doğrulanan bulguları düzeltme sonrası hedefli yeniden doğrulamaya girer.
+      // Uzman paneli ilk turda çalışır; panel açıkken güvenlik denetimini Claude'un güvenlik uzmanı yapar.
       const panelOn = deepOn && s.reviewPanel !== false;
-      // Derin inceleme düzeltme turlarında yalnızca kendi bildirdiklerini doğrular; panel ve yönetici bulguları
-      // bulgu defterinden yeniden doğrulanır (aşağıda).
-      const focus = attempt > 0 ? prevBlocking : null;
-      const openNow = deepOn ? panelLib.ledgerOpen(this.ledger()) : [];
-      const deepTask = () => (!deepOn
-        ? Promise.resolve(null)
-        : attempt > 0 && prevDeep && !focus.length
-          ? Promise.resolve(prevDeep)
-          : this.deepReview({ scope: `phase "${phaseName}"`, tasks: phaseTasks, reqIds: [...new Set(phaseTasks.flatMap((t) => t.covers || []))], checks, smoke, focus }));
       const geminiGate = () => this.gem({ system: P.phaseReviewSystem(lang, phaseName), parts: P.finalReviewParts({ job, checks, smoke, diff, phase: phaseName, snapshot, installed }), schema: P.REVIEW_SCHEMA, temperature: 0.2, maxOutputTokens: 32768 });
-      const [first, findings, deep, pnl, recheck] = await this.withCleanTree(() => this.together([
-        byAgent ? Promise.resolve(null) : geminiGate(),
-        // Panel açıkken güvenlik denetimini Claude'un güvenlik uzmanı yapar.
-        panelOn ? Promise.resolve([]) : this.securityAudit(diff, `faz "${phaseName}"`),
-        deepTask(),
-        panelOn && attempt === 0 ? this.reviewPanel({ scope: `phase "${phaseName}" (and the code it builds on)` }) : Promise.resolve(null),
-        openNow.length ? this.recheckFindings(openNow, `faz "${phaseName}"`) : Promise.resolve(null),
-      ]));
-      if (deep) prevDeep = deep;
-      // Ajanların yürüttüğü kapıda karar derin incelemeden gelir; o da yoksa Gemini'ye düşülür.
-      const raw = first || (byAgent ? (deep ? this.neutralReview(deep) : await this.reviewFallback(geminiGate, checks)) : first);
-      const reviewSrc = byAgent && deep ? 'review' : 'gemini';
-      review = await this.settleRound({
-        raw,
+      const round = await this.reviewRound({
+        attempt,
         checks,
-        extra: { ...(smoke?.error ? { forceIssue: `Uygulama çalıştırılamadı: ${smoke.error}` } : {}), forceIssues: this.smokeIssues(smoke) },
-        security: findings,
-        deep,
-        panel: pnl,
-        recheck,
-        openBefore: openNow,
+        smoke,
+        prevDeep,
+        deepOn,
+        manager: geminiGate,
+        // Ajanların yürüttüğü kapıda karar derin incelemeden gelir; o da yoksa Gemini'ye düşülür.
+        managerLeads: !byAgent,
+        security: panelOn ? null : () => this.securityAudit(diff, `faz "${phaseName}"`),
+        deep: { scope: `phase "${phaseName}"`, tasks: phaseTasks, reqIds: [...new Set(phaseTasks.flatMap((t) => t.covers || []))] },
+        panel: panelOn ? { scope: `phase "${phaseName}" (and the code it builds on)` } : null,
         at: `gate:${phaseName}`,
         label: `faz "${phaseName}"`,
-        canVerify: deepOn,
-        // Düzeltme turlarında panel yeniden çalışmaz; özeti arayüzde kalsın (engelleyiciliği yeniden doğrulama belirler).
         prevPanel: gate.review?.panel,
-        keepPrev: attempt > 0,
       });
+      const { deep, src: reviewSrc } = round;
+      review = round.review;
+      if (deep) prevDeep = deep;
       // Uzlaşma kuralı (yalnız faz kapısı): tüm kontroller geçti, Claude projeyi çalıştırıp onayladı ve güvenlik
       // temizse, ilk incelemenin tek başına itirazları düzeltme turu açmaz; sonraki görevlere ve son kabule aktarılır.
       const checksOk = !checks.some((c) => !c.ok && !c.env) && !smoke?.error;
@@ -386,49 +410,32 @@ ${diff?.stat ? `### Değişen dosyalar\n\`\`\`\n${diff.stat}\n\`\`\`` : ''}`);
       if (depAudit) this.log('test', depAudit.highCritical.length ? 'warn' : 'ok', `Bağımlılık güvenlik taraması: ${depAudit.summary}${depAudit.highCritical.length ? ` — ${depAudit.highCritical.slice(0, 5).join(', ')}` : ''}`);
       const deepOn = s.reviewLevel !== 'standard';
       const installed = project.installedVersions(dir);
-      const prevBlocking = this.deepBlocking(prevDeep);
       // Bakım işlerinde değişen kod her görevin sonunda uzmanlarca incelendi; tüm proje yeniden taranmaz.
       // Özellik ekleme yeni yüzey getirir: eklenen özellik ve dokunduğu kod üç uzmanca da taranır.
       const panelOn = deepOn && s.reviewPanel !== false && (!job.kind || job.kind === 'feature');
       const finalScope = job.kind ? `the ${P.MAINTENANCE_LABEL[job.kind]} just applied to the project and the code it touches (final acceptance of the change, including regressions)` : 'the whole project (final acceptance)';
-      // Derin inceleme düzeltme turlarında yalnızca kendi bildirdiklerini doğrular; panel ve yönetici bulguları
-      // bulgu defterinden yeniden doğrulanır. Teslimden önce defterde açık orta+ bulgu kalamaz.
-      const focus = attempt > 0 ? prevBlocking : null;
       // İlk turda: daha önce "belirsiz" kalan bulgular kararlı biçimde değerlendirilir (ya açık ya yanlış alarm).
+      // Teslimden önce defterde açık orta+ bulgu kalamaz (reviewRound açık olanları yeniden doğrular).
       if (deepOn && attempt === 0) await this.withCleanTree(() => this.settleUncertain());
-      const openNow = deepOn ? panelLib.ledgerOpen(this.ledger()) : [];
-      const deepTask = () => (!deepOn
-        ? Promise.resolve(null)
-        : attempt > 0 && prevDeep && !focus.length
-          ? Promise.resolve(prevDeep)
-          : this.deepReview({ scope: finalScope, tasks: job.tasks.filter((t) => t.status !== 'skipped'), reqIds: notMet, checks, smoke, focus }));
-      const [raw, findings, deep, pnl, recheck] = await this.withCleanTree(() => this.together([
-        this.gem({ system: P.finalReviewSystem(lang), parts: P.finalReviewParts({ job, checks, smoke, diff, snapshot, installed }), schema: P.REVIEW_SCHEMA, temperature: 0.2, maxOutputTokens: 32768 }),
-        panelOn
-          ? Promise.resolve([])
-          : attempt === 0 || (review?.security || []).length || depAudit?.highCritical?.length ? this.securityAudit(diff, 'tüm proje', depAudit) : Promise.resolve([]),
-        deepTask(),
-        panelOn && attempt === 0 ? this.reviewPanel({ scope: finalScope, depAudit }) : Promise.resolve(null),
-        openNow.length ? this.recheckFindings(openNow, 'son kabul') : Promise.resolve(null),
-      ]));
-      if (deep) prevDeep = deep;
-      const brokenServer = smoke && smoke.error ? `Uygulama çalıştırılamadı: ${smoke.error}` : null;
-      // Son kabulde de doğrulanmış orta ve üstü her bulgu teslimi engeller.
-      review = await this.settleRound({
-        raw,
+      const securityDue = attempt === 0 || (review?.security || []).length || depAudit?.highCritical?.length;
+      const round = await this.reviewRound({
+        attempt,
         checks,
-        extra: { ...(brokenServer ? { forceIssue: brokenServer } : {}), forceIssues: this.smokeIssues(smoke) },
-        security: findings,
-        deep,
-        panel: pnl,
-        recheck,
-        openBefore: openNow,
+        smoke,
+        prevDeep,
+        deepOn,
+        manager: () => this.gem({ system: P.finalReviewSystem(lang), parts: P.finalReviewParts({ job, checks, smoke, diff, snapshot, installed }), schema: P.REVIEW_SCHEMA, temperature: 0.2, maxOutputTokens: 32768 }),
+        managerLeads: true,
+        security: panelOn || !securityDue ? null : () => this.securityAudit(diff, 'tüm proje', depAudit),
+        deep: { scope: finalScope, tasks: job.tasks.filter((t) => t.status !== 'skipped'), reqIds: notMet },
+        panel: panelOn ? { scope: finalScope, depAudit } : null,
         at: 'final',
         label: 'son kabul',
-        canVerify: deepOn,
         prevPanel: job.finalReview?.panel,
-        keepPrev: attempt > 0,
       });
+      const { deep } = round;
+      review = round.review;
+      if (deep) prevDeep = deep;
       // Kanıtla düzeltilmiş puan: defterde açık bulgu varken yüksek puan verilemez.
       const stillOpen = panelLib.ledgerOpen(this.ledger());
       if (stillOpen.length && review.qualityScore != null) review.qualityScore = Math.min(review.qualityScore, stillOpen.some((f) => SEVERE.has(f.severity)) ? 5 : 7);
