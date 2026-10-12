@@ -2,7 +2,7 @@
 import './maintenance.js';
 import './env.js';
 import './sidebar.js';
-import { api, $, IS_MAC, state, attempt } from './core.js';
+import { api, $, IS_MAC, managerOf, state, attempt } from './core.js';
 import { show, refreshHistory, refreshHistorySoon, renderHistory, openJob } from './history.js';
 import { refreshAgents, renderAgentStatus, renderConnSoon } from './agents.js';
 import { renderThemeBtn } from './theme.js';
@@ -85,6 +85,6 @@ async function init() {
   if (cur?.job && cur.busy) await openJob(cur.job.id);
   else show('compose');
   refreshAgents();
-  if (!state.settings?.hasGeminiKey) setTimeout(() => openSettings(), 400);
+  if (!managerOf(state.settings).has) setTimeout(() => openSettings(), 400);
 }
 init();

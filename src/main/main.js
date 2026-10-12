@@ -8,6 +8,7 @@ const { fixPath, findExecutable, agentEnv } = require('./env');
 const runner = require('./runner');
 const settings = require('./settings');
 const gemini = require('./gemini');
+const anthropic = require('./anthropic');
 const agents = require('./agents');
 const docs = require('./docs');
 const jobs = require('./jobs');
@@ -324,6 +325,15 @@ handle('env:save', ({ dir, set, remove } = {}) => {
 handle('env:parse', (text) => envfile.parseEnv(String(text || '').slice(0, 200000)));
 
 handle('gemini:models', () => gemini.listModels({ apiKey: settings.get().geminiKey }));
+handle('anthropic:models', () => anthropic.listModels({ apiKey: settings.get().anthropicKey }));
+handle('anthropic:test', async () => {
+  const s = settings.get();
+  const text = await anthropic.generate({ apiKey: s.anthropicKey, model: s.anthropicModel, parts: [{ text: 'Reply with exactly: OK' }], maxOutputTokens: 256, effort: 'low' });
+  // Yönetici adımlarının çoğu şemalı (JSON) çağrıdır: test o yolu da dener, yoksa ilk planlamada patlar.
+  const json = await anthropic.generate({ apiKey: s.anthropicKey, model: s.anthropicModel, parts: [{ text: 'Return ok=true.' }], schema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'] }, maxOutputTokens: 256, effort: 'low' });
+  if (json?.ok !== true) throw new Error(`Claude API şemalı yanıtı beklenen gibi değil: ${JSON.stringify(json).slice(0, 120)}`);
+  return { model: s.anthropicModel, reply: `${text.trim().slice(0, 40)} · JSON ✓` };
+});
 handle('gemini:test', async () => {
   const s = settings.get();
   const text = await gemini.generate({ apiKey: s.geminiKey, model: s.geminiModel, parts: [{ text: 'Reply with exactly: OK' }], temperature: 0 });

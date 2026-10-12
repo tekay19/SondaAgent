@@ -333,6 +333,15 @@
             <input type="hidden" name="theme" />
           </fieldset>
           <fieldset>
+            <legend>Yönetici</legend>
+            <label class="field"><span>Ürün tanımı, plan onayı, son kabul ve rapor</span>
+              <select name="managerBy" id="managerBySel">
+                <option value="gemini">Gemini</option>
+                <option value="anthropic">Claude (API anahtarı)</option>
+              </select>
+            </label>
+          </fieldset>
+          <fieldset id="geminiFieldset">
             <legend>Gemini</legend>
             <label class="field">
               <span>API anahtarı <a href="#" data-href="https://aistudio.google.com/apikey" class="ext">anahtar al ↗</a></span>
@@ -349,6 +358,26 @@
                 <datalist id="modelList"></datalist>
                 <button type="button" id="loadModelsBtn" class="btn ghost sm">Modelleri getir</button>
                 <button type="button" id="testGeminiBtn" class="btn ghost sm">Test et</button>
+              </div>
+            </label>
+          </fieldset>
+          <fieldset id="anthropicFieldset" hidden>
+            <legend>Claude API</legend>
+            <label class="field">
+              <span>API anahtarı <a href="#" data-href="https://console.anthropic.com/settings/keys" class="ext">anahtar al ↗</a></span>
+              <div class="row">
+                <input type="password" name="anthropicKey" id="anthropicKeyInput" autocomplete="off" spellcheck="false" />
+                <button type="button" id="clearAnthropicKeyBtn" class="btn ghost sm">Sil</button>
+              </div>
+              <small id="anthropicKeyHint" class="hint"></small>
+            </label>
+            <label class="field">
+              <span>Model</span>
+              <div class="row">
+                <input name="anthropicModel" list="anthropicModelList" spellcheck="false" />
+                <datalist id="anthropicModelList"></datalist>
+                <button type="button" id="loadAnthropicModelsBtn" class="btn ghost sm">Modelleri getir</button>
+                <button type="button" id="testAnthropicBtn" class="btn ghost sm">Test et</button>
               </div>
             </label>
           </fieldset>
@@ -396,8 +425,8 @@
             <legend>Planlama ve inceleme</legend>
             <label class="field"><span>Planı kim yazsın</span>
               <select name="planner">
-                <option value="claude">Claude yazar, Gemini onaylar (önerilen)</option>
-                <option value="gemini">Gemini yazar, Claude eleştirir (daha hızlı)</option>
+                <option value="claude">Claude yazar, yönetici onaylar (önerilen)</option>
+                <option value="gemini">Yönetici yazar, Claude eleştirir (daha hızlı)</option>
               </select>
             </label>
             <label class="field"><span>İnceleme gücü</span>
@@ -407,7 +436,7 @@
                 <option value="max">Maksimum — her görevde mimari/test uzmanı da (en yavaş)</option>
               </select>
             </label>
-            <label class="field"><span>Gemini'nin rolü</span>
+            <label class="field"><span>Yöneticinin rolü</span>
               <select name="geminiRole">
                 <option value="manager">Yönetici — ürün tanımı, plan onayı ve teslim (önerilen)</option>
                 <option value="full">Her adımda — her görevi ve fazı da inceler, hafızayı yazar</option>
@@ -417,7 +446,7 @@
               <select name="briefBy">
                 <option value="fable">Claude Fable 5.1 — kodu gezerek yazar (önerilen)</option>
                 <option value="coder">Claude — kodlama modeliyle</option>
-                <option value="gemini">Gemini</option>
+                <option value="gemini">Yönetici (Gemini ya da Claude API)</option>
               </select>
             </label>
           </fieldset>
@@ -430,7 +459,7 @@
             <label class="check"><input type="checkbox" name="independentAudit" /> <span title="Claude birkaç görevde bir bitmiş kodun tamamını kalan görevlerle birlikte denetler; doğrulanan önerileri sonraki görevden önce uygulatır">Bağımsız denetim</span></label>
             <label class="check"><input type="checkbox" name="securityReview" /> <span>Bağımlılık güvenlik taraması ve (panel kapalıyken) güvenlik denetimi</span></label>
             <label class="check"><input type="checkbox" name="taskBriefing" /> <span>Her görevden önce teknik brif yazılsın</span></label>
-            <label class="check"><input type="checkbox" name="planSelfReview" /> <span>Gemini planı ikinci kez denetlesin</span></label>
+            <label class="check"><input type="checkbox" name="planSelfReview" /> <span>Yönetici planı ikinci kez denetlesin</span></label>
             <label class="check"><input type="checkbox" name="tddMode" /> <span>TDD modu</span></label>
           </fieldset>
           <fieldset>

@@ -392,7 +392,7 @@ class Review {
 
   // Ajan incelemesi sonuç vermediğinde: Gemini anahtarı varsa Gemini inceler; yoksa karar yalnızca kontrollere dayanır.
   async reviewFallback(geminiReview, checks) {
-    if (settings.get().geminiKey) {
+    if (settings.managerReady(settings.get())) {
       this.log('gemini', 'info', 'İncelemeyi Gemini yapıyor (yedek)…');
       try {
         return await geminiReview();

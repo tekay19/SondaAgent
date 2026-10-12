@@ -9,6 +9,11 @@ const { writeFileAtomic } = require('./fsx');
 
 const DEFAULTS = {
   geminiModel: 'gemini-pro-latest',
+  // "Yönetici" (ürün tanımı, plan onayı, son kabul, rapor) kim olsun: gemini | anthropic (Claude API anahtarı).
+  // Kodlayan ve inceleyen Claude oturumları bundan bağımsızdır: onlar hep Claude CLI ve abonelikle çalışır.
+  managerBy: 'gemini',
+  // Yönetici işleri (onay, son kabul, rapor) için çok pahalı olmayan model; daha ucuzu: claude-haiku-4-5-20251001.
+  anthropicModel: 'claude-sonnet-5-5',
   defaultAgent: 'claude',
   claudeModel: '', // boş = varsayılan (Opus 5.5); bkz. models.js
   claudeEffort: 'high', // '' | low | medium | high | xhigh | max
@@ -60,6 +65,7 @@ const ENUMS = {
   codexPermission: ['full', 'safe'],
   reviewLevel: ['standard', 'deep', 'max'],
   planner: ['claude', 'gemini'],
+  managerBy: ['gemini', 'anthropic'],
   geminiRole: ['manager', 'full'],
   briefBy: ['fable', 'coder', 'gemini'],
   theme: ['system', 'light', 'dark'],
@@ -94,7 +100,7 @@ function load() {
   }
   cache = { ...DEFAULTS };
   for (const [k, v] of Object.entries(raw && typeof raw === 'object' ? raw : {})) {
-    if (k === 'geminiKeyEnc' || k === 'geminiKeyPlain') cache[k] = v;
+    if (k === 'geminiKeyEnc' || k === 'geminiKeyPlain' || k === 'anthropicKeyEnc' || k === 'anthropicKeyPlain') cache[k] = v;
     else if (k in DEFAULTS) {
       const clean = sanitize(k, v);
       if (clean !== undefined) cache[k] = clean;
@@ -147,6 +153,36 @@ function getGeminiKey() {
   return key;
 }
 
+let anthropicKeyInvalid = false;
+
+// Yalnızca Sonda'ya girilen anahtar kullanılır; ANTHROPIC_API_KEY ortam değişkeni bilerek okunmaz (başka bir
+// amaçla ayarlanmış bir anahtar sessizce ayrı faturalanmasın; ajanların ortamından da zaten ayıklanır).
+function getAnthropicKey() {
+  const s = load();
+  anthropicKeyInvalid = false;
+  let key = '';
+  if (s.anthropicKeyEnc && safeStorage.isEncryptionAvailable()) {
+    try {
+      key = cleanKey(safeStorage.decryptString(Buffer.from(s.anthropicKeyEnc, 'base64')));
+    } catch {
+      key = '';
+    }
+  } else {
+    key = cleanKey(s.anthropicKeyPlain || '');
+  }
+  if (key && !isValidKey(key)) {
+    anthropicKeyInvalid = true;
+    return '';
+  }
+  return key;
+}
+
+function anthropicKeySource() {
+  const s = load();
+  if (s.anthropicKeyEnc) return 'keychain';
+  return s.anthropicKeyPlain ? 'file' : null;
+}
+
 function keySource() {
   const s = load();
   if (s.geminiKeyEnc) return 'keychain';
@@ -161,13 +197,14 @@ function mask(key) {
 
 // Ana süreç için tam ayarlar (anahtar dahil).
 function get() {
-  return { ...load(), geminiKey: getGeminiKey() };
+  return { ...load(), geminiKey: getGeminiKey(), anthropicKey: getAnthropicKey() };
 }
 
 // Arayüze gönderilen ayarlar: ham anahtar yerine maskelenmiş hali.
 function getPublic() {
-  const { geminiKeyEnc, geminiKeyPlain, ...rest } = load();
+  const { geminiKeyEnc, geminiKeyPlain, anthropicKeyEnc, anthropicKeyPlain, ...rest } = load();
   const key = getGeminiKey();
+  const anthropicKey = getAnthropicKey();
   const model = claudeModelOf(rest);
   return {
     ...rest,
@@ -175,6 +212,10 @@ function getPublic() {
     geminiKeyInvalid: keyInvalid,
     geminiKeyMasked: mask(key),
     geminiKeySource: keySource(),
+    hasAnthropicKey: !!anthropicKey,
+    anthropicKeyInvalid,
+    anthropicKeyMasked: mask(anthropicKey),
+    anthropicKeySource: anthropicKeySource(),
     defaultStandards: DEFAULT_STANDARDS,
     // Claude modeli: kullanılan model, varsayılan ve Ayarlar'daki seçenekler (arayüz bunları gösterir).
     claudeModelEffective: model,
@@ -186,7 +227,7 @@ function getPublic() {
 
 function save(patch = {}) {
   const s = load();
-  const { geminiKey, clearGeminiKey, ...rest } = patch || {};
+  const { geminiKey, clearGeminiKey, anthropicKey, clearAnthropicKey, ...rest } = patch || {};
   for (const [k, v] of Object.entries(rest)) {
     if (!(k in DEFAULTS)) continue;
     const clean = sanitize(k, v);
@@ -208,6 +249,20 @@ function save(patch = {}) {
       delete s.geminiKeyEnc;
     }
   }
+  if (clearAnthropicKey) {
+    delete s.anthropicKeyEnc;
+    delete s.anthropicKeyPlain;
+  } else if (typeof anthropicKey === 'string' && cleanKey(anthropicKey)) {
+    const key = cleanKey(anthropicKey);
+    if (!isValidKey(key)) throw new Error('Anthropic API anahtarı geçersiz karakter içeriyor. Anahtarı console.anthropic.com\'dan tekrar kopyalayıp yapıştırın.');
+    if (safeStorage.isEncryptionAvailable()) {
+      s.anthropicKeyEnc = safeStorage.encryptString(key).toString('base64');
+      delete s.anthropicKeyPlain;
+    } else {
+      s.anthropicKeyPlain = key;
+      delete s.anthropicKeyEnc;
+    }
+  }
   clampNumbers(s);
   if (typeof s.standards === 'string' && s.standards.trim() === DEFAULT_STANDARDS.trim()) s.standards = '';
   persist();
@@ -219,4 +274,10 @@ function clampInt(v, min, max, def) {
   return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : def;
 }
 
-module.exports = { get, getPublic, save };
+// Yönetici (Gemini ya da Claude API) kullanıma hazır mı: seçili sağlayıcının anahtarı var mı.
+const managerReady = (s = get()) => (s.managerBy === 'anthropic' ? !!s.anthropicKey : !!s.geminiKey);
+const managerMissingMessage = (s = get()) => (s.managerBy === 'anthropic' ? 'Anthropic API anahtarı yok. Ayarlar\'dan ekleyin.' : 'Gemini API anahtarı yok. Ayarlar\'dan ekleyin.');
+// Günlük satırlarında sağlayıcı adını belirlemek için: anahtarı çözmeden yalnızca seçimi okur.
+const managerBy = () => (load().managerBy === 'anthropic' ? 'anthropic' : 'gemini');
+
+module.exports = { get, getPublic, save, managerReady, managerMissingMessage, managerBy };

@@ -1,5 +1,5 @@
 // Log akışı ve ekran görüntüleri.
-import { $, $$, esc, stIcon, AGENT_SHORT, SRC_LABEL, state, fmtTime } from './core.js';
+import { $, $$, esc, stIcon, AGENT_SHORT, SRC_LABEL, managerOf, state, fmtTime } from './core.js';
 import { emptyHtml } from './theme.js';
 import { setMenu } from './header.js';
 
@@ -11,6 +11,7 @@ function logVisible(e) {
   return e.src === f;
 }
 function srcLabel(src) {
+  if (src === 'gemini') return managerOf(state.settings).name;
   return src === 'agent' ? AGENT_SHORT[state.job?.agent] || 'Ajan' : SRC_LABEL[src] || src;
 }
 // Satır başındaki ✓ / ✗ işaretleri durum baklavasına çevrilir (✓ bitti, ✗ olmadı).

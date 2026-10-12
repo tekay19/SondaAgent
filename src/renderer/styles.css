@@ -188,6 +188,10 @@ code, .mono { font-family: var(--mono); }
 
 .drag { -webkit-app-region: drag; }
 .no-drag, .drag button, .drag input, .drag a { -webkit-app-region: no-drag; }
+/* Pencere (dialog) ya da büyütülmüş görsel açıkken sürükleme bölgeleri kapanır. İşletim sistemi sürükleme bölgesini
+   üstteki öğelerin ÖNÜNDE sayar: uzun bir pencerenin sağ üstündeki X, işin başlığının altına girip tıklamayı yutuyordu
+   (pencere kapanmıyor, arkadaki sayfa kilitli kalıyordu). */
+body:has(dialog[open]) .drag, body:has(.lightbox) .drag { -webkit-app-region: no-drag; }
 .titlebar-space { height: 40px; flex: none; }
 body.darwin .titlebar-space { height: 38px; }
 body.win32 .titlebar-space { height: 36px; }

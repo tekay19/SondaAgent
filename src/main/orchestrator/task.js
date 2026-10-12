@@ -82,7 +82,7 @@ class Task {
         if (agents.AUTH_ERROR.test(e.message)) throw e;
         this.log('review', 'warn', `Brif oturumu başarısız: ${e.message}`);
       }
-      if (!settings.get().geminiKey) {
+      if (!settings.managerReady(settings.get())) {
         this.log('system', 'warn', 'Brif hazırlanamadı; görev planıyla devam ediliyor.');
         return null;
       }
@@ -168,7 +168,7 @@ class Task {
     const res = await this.runAgent(P.testReviewAgentPrompt({ job, task, files }), { mode: 'review', schema: P.TEST_REVIEW_JSON_SCHEMA, agentId: rid, label: 'TDD test incelemesi', src: 'review', timeoutMin: 10, effort: s.reviewEffort || undefined, quiet: true });
     const out = res.structured || agents.jsonFromText(res.transcript || res.text);
     if (['ok', 'fix'].includes(out?.verdict)) return { tr: out, src: 'review' };
-    if (!settings.get().geminiKey) {
+    if (!settings.managerReady(settings.get())) {
       this.log('review', 'warn', 'TDD test incelemesi sonuç vermedi; testler incelenmeden devam ediliyor.');
       return { tr: null, src: 'review' };
     }

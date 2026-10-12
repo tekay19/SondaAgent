@@ -1,5 +1,5 @@
 // Yeni iş ekranı: klasör, ajan, ekler (doküman / tasarım), hazırlık durumu, plan başlatma.
-import { api, $, $$, esc, state, toast, attempt, baseName, ico, semverOf, fmtSize, dirBusy } from './core.js';
+import { api, $, $$, esc, managerOf, state, toast, attempt, baseName, ico, semverOf, fmtSize, dirBusy } from './core.js';
 import { show, refreshHistorySoon, openJob } from './history.js';
 import { refreshAgents, renderAgentStatus, needsConnection, connectionHtml, onConnClick, connectAgent } from './agents.js';
 import { renderJob } from './job.js';
@@ -67,8 +67,9 @@ function addAttachments(list, target = state.compose.attachments) {
 function renderReadiness() {
   const el = $('#readiness');
   const items = [];
-  if (state.settings && !state.settings.hasGeminiKey) {
-    items.push(`<div class="ready-item warn">${ico('key')}<span>${state.settings.geminiKeyInvalid ? 'Kayıtlı Gemini anahtarı okunamadı; yeniden girin.' : 'Gemini API anahtarı eklenmemiş.'}</span><button class="btn sm" data-act="settings">Ayarları aç</button></div>`);
+  const mgr = managerOf(state.settings);
+  if (state.settings && !mgr.has) {
+    items.push(`<div class="ready-item warn">${ico('key')}<span>${mgr.invalid ? `Kayıtlı ${mgr.name} anahtarı okunamadı; yeniden girin.` : `${mgr.name} API anahtarı eklenmemiş.`}</span><button class="btn sm" data-act="settings">Ayarları aç</button></div>`);
   }
   const ag = state.agents?.[state.compose.agent];
   // Claude her işte gerekir (planlama ve incelemeler); Codex yalnızca kodlayan ajan olarak seçildiyse.
@@ -101,7 +102,7 @@ function renderReadiness() {
   el.hidden = !items.length;
   // Giriş durumu yalnızca uyarıdır: bazı ortamlarda CLI yanlış "giriş yok" diyebilir;
   // gerçek bir giriş sorunu iş başında net bir hata olarak zaten görünür.
-  $('#planBtn').disabled = full || here || !state.settings?.hasGeminiKey || (ag && !ag.found) || (claude && !claude.found);
+  $('#planBtn').disabled = full || here || !managerOf(state.settings).has || (ag && !ag.found) || (claude && !claude.found);
 }
 
 $('#readiness').addEventListener('click', async (e) => {

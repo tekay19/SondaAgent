@@ -18,7 +18,7 @@ class Maintenance {
     if (!['bugfix', 'refactor', 'feature'].includes(kind)) throw new Error('Geçersiz iş türü.');
     if (!projectDir || !fs.existsSync(projectDir) || project.isEmptyDir(projectDir)) throw new Error('Bu klasörde üzerinde çalışılacak bir proje yok.');
     const s = settings.get();
-    if (!s.geminiKey) throw new Error('Gemini API anahtarı yok. Ayarlar\'dan ekleyin.');
+    if (!settings.managerReady(s)) throw new Error(settings.managerMissingMessage(s));
     const agentId = agents.ADAPTERS[agent] ? agent : s.defaultAgent;
     if (!agents.resolveBin(agentId, s)) throw new Error(`${agents.ADAPTERS[agentId].label} bulunamadı. Kurulum: ${agents.ADAPTERS[agentId].install}`);
     const list = (items || bugs || []).map((b) => String(b || '').trim()).filter(Boolean);
@@ -76,7 +76,7 @@ class Maintenance {
       : bug
         ? `Hata inceleniyor: ${agents.ADAPTERS[rid].label} kök nedeni arıyor (salt okunur)…`
         : `Kod sağlığı taraması: ${agents.ADAPTERS[rid].label} refactor adaylarını ve hataları çıkarıyor (salt okunur)…`);
-    if (!feedback) this.log('system', 'info', `Modeller · Gemini: ${s.geminiModel}${this.modelNote(s)}`);
+    if (!feedback) this.log('system', 'info', `Modeller · ${this.managerNote(s)}${this.modelNote(s)}`);
     if (basePlan) this.log('system', 'info', `Önceki Sonda planı devralındı: ${basePlan.projectName} · ${(basePlan.requirements || []).length} gereksinim korunacak.`);
     else this.log('system', 'info', 'Bu klasör için Sonda planı yok; proje önce incelenip tanınacak.');
 

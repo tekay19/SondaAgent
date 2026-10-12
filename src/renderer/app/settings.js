@@ -11,7 +11,7 @@ const form = $('#settingsForm');
 function fillSettings() {
   const s = state.settings;
   for (const el of form.elements) {
-    if (!el.name || el.name === 'geminiKey' || el.name === 'standards') continue;
+    if (!el.name || el.name === 'geminiKey' || el.name === 'anthropicKey' || el.name === 'standards') continue;
     if (el.type === 'checkbox') el.checked = !!s[el.name];
     else if (s[el.name] !== undefined) el.value = s[el.name];
   }
@@ -24,6 +24,16 @@ function fillSettings() {
       ? 'Kayıtlı anahtar okunamadı (bozuk ya da eski sürümden kalma). Anahtarı yeniden yapıştırıp kaydedin.'
       : 'Anahtar kayıtlı değil.';
   $('#keyHint').style.color = !s.hasGeminiKey && s.geminiKeyInvalid ? 'var(--warn)' : '';
+  form.elements.anthropicKey.value = '';
+  form.elements.anthropicKey.placeholder = s.hasAnthropicKey ? 'Yeni anahtar girmek için yazın' : 'sk-ant-…';
+  const aWhere = { keychain: 'işletim sisteminin anahtar zincirinde şifreli', file: 'ayar dosyasında (bu sistemde şifreleme yok)' }[s.anthropicKeySource] || '';
+  $('#anthropicKeyHint').textContent = s.hasAnthropicKey
+    ? `Kayıtlı anahtar: ${s.anthropicKeyMasked}${aWhere ? ` (${aWhere})` : ''}`
+    : s.anthropicKeyInvalid
+      ? 'Kayıtlı anahtar okunamadı (bozuk). Anahtarı yeniden yapıştırıp kaydedin.'
+      : 'Anahtar kayıtlı değil.';
+  $('#anthropicKeyHint').style.color = !s.hasAnthropicKey && s.anthropicKeyInvalid ? 'var(--warn)' : '';
+  showManagerFields();
   $('#standardsInput').value = s.standards || s.defaultStandards;
   setThemeSeg(s.theme || 'system');
   fillModelSelect(s);
@@ -85,6 +95,7 @@ function collectSettings() {
     else patch[el.name] = el.value;
   }
   if (!patch.geminiKey) delete patch.geminiKey;
+  if (!patch.anthropicKey) delete patch.anthropicKey;
   return patch;
 }
 
@@ -184,6 +195,35 @@ $('#testGeminiBtn').addEventListener('click', async () => {
   fillSettings();
   const r = await attempt(() => api.testGemini());
   if (r) toast(`Gemini çalışıyor (${r.model}): "${r.reply}"`);
+});
+// Seçili yöneticinin alanı görünür; diğeri gizlenir (anahtarı kayıtlı kalır).
+function showManagerFields() {
+  const anthropic = $('#managerBySel').value === 'anthropic';
+  $('#geminiFieldset').hidden = anthropic;
+  $('#anthropicFieldset').hidden = !anthropic;
+}
+$('#managerBySel').addEventListener('change', showManagerFields);
+$('#clearAnthropicKeyBtn').addEventListener('click', async () => {
+  if (!confirm('Kayıtlı Anthropic API anahtarı silinsin mi?')) return;
+  if (await saveSettings({ clearAnthropicKey: true })) fillSettings();
+});
+$('#loadAnthropicModelsBtn').addEventListener('click', async () => {
+  const key = form.elements.anthropicKey.value.trim();
+  if (key && !(await saveSettings({ anthropicKey: key }))) return;
+  const models = await attempt(() => api.listAnthropicModels());
+  if (!models) return;
+  $('#anthropicModelList').innerHTML = models.map((m) => `<option value="${esc(m.id)}">${esc(m.label)}</option>`).join('');
+  toast(`${models.length} model bulundu.`);
+  fillSettings();
+});
+$('#testAnthropicBtn').addEventListener('click', async () => {
+  const patch = { anthropicModel: form.elements.anthropicModel.value.trim() };
+  const key = form.elements.anthropicKey.value.trim();
+  if (key) patch.anthropicKey = key;
+  if (!(await saveSettings(patch))) return;
+  fillSettings();
+  const r = await attempt(() => api.testAnthropic());
+  if (r) toast(`Claude API çalışıyor (${r.model}): "${r.reply}"`);
 });
 $('#resetStandardsBtn').addEventListener('click', () => {
   $('#standardsInput').value = state.settings.defaultStandards;

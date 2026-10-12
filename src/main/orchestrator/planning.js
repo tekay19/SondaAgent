@@ -19,7 +19,7 @@ class Planning {
     const files = docs.sanitizeAttachments(attachments);
     if (!String(idea || '').trim() && !files.length) throw new Error('Bir istek yazın veya doküman ekleyin.');
     const s = settings.get();
-    if (!s.geminiKey) throw new Error('Gemini API anahtarı yok. Ayarlar\'dan ekleyin.');
+    if (!settings.managerReady(s)) throw new Error(settings.managerMissingMessage(s));
     const agentId = agents.ADAPTERS[agent] ? agent : s.defaultAgent;
     fs.mkdirSync(projectDir, { recursive: true });
 
@@ -74,7 +74,7 @@ class Planning {
     const job = this.job;
     const s = settings.get();
     this.log('gemini', 'step', feedback ? 'Plan geri bildirime göre güncelleniyor…' : job.discovery ? 'Planlama sürüyor…' : 'Gemini isteği analiz ediyor…');
-    if (!job.discovery && !feedback) this.log('system', 'info', `Modeller · Gemini: ${s.geminiModel}${this.modelNote(s)}`);
+    if (!job.discovery && !feedback) this.log('system', 'info', `Modeller · ${this.managerNote(s)}${this.modelNote(s)}`);
     this.syncEnv();
     const existing = project.describe(job.projectDir);
     if (existing && !job.discovery) this.log('system', 'info', 'Klasörde mevcut proje bulundu; plan bunun üzerine kurulacak.');

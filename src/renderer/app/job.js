@@ -1,5 +1,5 @@
 // İş görünümü: başlık, istatistikler, plan içeriği, görevler, plan eylemleri, rapor ve belgeler.
-import { api, $, $$, esc, md, firstLine, stIcon, PHASES, ACTIVE, TASK_STATUS, KIND_LABEL, FINDING_LABEL, SEV_LABEL, state, toast, attempt, baseName, ico, fmtDur, busyHere, isLiveJob } from './core.js';
+import { api, $, $$, esc, md, firstLine, stIcon, PHASES, ACTIVE, TASK_STATUS, KIND_LABEL, FINDING_LABEL, SEV_LABEL, managerOf, state, toast, attempt, baseName, ico, fmtDur, busyHere, isLiveJob } from './core.js';
 import { renderEnvBadge } from './history.js';
 import { connectAgent } from './agents.js';
 import { emptyHtml, KLOADER } from './theme.js';
@@ -73,6 +73,7 @@ function renderStats() {
   if (st.agentRuns) rows.push(['Ajan oturumu', `${st.agentRuns}×`]);
   if (st.costUsd) rows.push(['API karşılığı*', `≈$${st.costUsd.toFixed(2)}`]);
   if (st.geminiTokens) rows.push(['Gemini', `${Math.round(st.geminiTokens / 1000)}K token`]);
+  if (st.managerTokens) rows.push(['Claude API', `${Math.round(st.managerTokens / 1000)}K token`]);
   if (dur) rows.push(['Süre', dur]);
   $('#jobStats').innerHTML = rows.length ? rows.map(([k, v]) => `<span>${k}</span><b>${v}</b>`).join('') : '<span>Henüz istatistik yok</span>';
   $('#jobStats').title = st.costUsd ? '* Claude aboneliğinle çalışıyorsan ücret yok; bu, aynı işin API fiyatlarıyla tahmini karşılığıdır.' : '';
@@ -116,7 +117,7 @@ function renderPlanContent() {
         : job.discovery
       ? 'Gereksinimler çıkarılıyor; ardından plan yazılacak (10–25 dk).'
       : 'Ürün tanımı hazırlanıyor…';
-    el.innerHTML = `<div class="sec"><div class="sec-title">${brief ? 'Ürün tanımı (Gemini keşfi)' : job.kind ? KIND_LABEL[job.kind] : 'Plan'}</div>
+    el.innerHTML = `<div class="sec"><div class="sec-title">${brief ? `Ürün tanımı (${managerOf(state.settings).name} keşfi)` : job.kind ? KIND_LABEL[job.kind] : 'Plan'}</div>
         ${job.kind && job.idea ? `<p class="summary-text" style="white-space:pre-wrap;margin-bottom:10px">${esc(job.idea)}</p>` : ''}
         ${job.phase === 'planning' ? `<p class="summary-text" style="color:var(--muted)">${KLOADER}${waitingText}</p>` : ''}
         ${!brief && job.phase !== 'planning' ? `<p class="summary-text" style="color:var(--muted)">${esc(job.error || (job.kind ? 'İnceleme tamamlanamadı.' : 'Plan oluşturulamadı.'))}</p>` : ''}
@@ -241,7 +242,7 @@ function renderPlanContent() {
         ${lessonsHtml}
         ${p.threatModel?.length ? fold('Tehdit modeli', `<ul class="bullets">${p.threatModel.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>`, p.threatModel.length, false) : ''}
         ${job.discovery?.productBrief ? fold('Ürün tanımı', `<div class="md brief">${md(job.discovery.productBrief)}</div>${job.discovery.answers?.length ? `<h5 class="mini-h">Kararların</h5><ul class="bullets">${job.discovery.answers.map((a) => `<li>${esc(a.question)} → <b>${esc(a.answer)}</b></li>`).join('')}</ul>` : ''}`, null, false) : ''}
-        ${job.planReview?.rounds?.length ? fold(`Plan değerlendirmesi <span class="count">${esc(job.planReview.planner)} yazdı, Gemini yönetti</span>`, job.planReview.rounds.map((r, i) => `<h5 class="mini-h">Tur ${i + 1} · ${r.verdict === 'approve' ? `${stIcon('done')} onay` : `${ico('refresh')} değişiklik istendi`}</h5><p class="summary-text">${esc(r.summary)}</p>${(r.findings || []).length ? `<ul class="bullets">${r.findings.map((f) => `<li><span class="badge ${f.severity === 'high' ? 'err' : f.severity === 'medium' ? 'warn' : ''}">${esc(f.severity)}</span> ${esc(f.problem)}</li>`).join('')}</ul>` : ''}`).join(''), null, false) : ''}
+        ${job.planReview?.rounds?.length ? fold(`Plan değerlendirmesi <span class="count">${esc(job.planReview.planner)} yazdı, ${esc(managerOf(state.settings).name)} yönetti</span>`, job.planReview.rounds.map((r, i) => `<h5 class="mini-h">Tur ${i + 1} · ${r.verdict === 'approve' ? `${stIcon('done')} onay` : `${ico('refresh')} değişiklik istendi`}</h5><p class="summary-text">${esc(r.summary)}</p>${(r.findings || []).length ? `<ul class="bullets">${r.findings.map((f) => `<li><span class="badge ${f.severity === 'high' ? 'err' : f.severity === 'medium' ? 'warn' : ''}">${esc(f.severity)}</span> ${esc(f.problem)}</li>`).join('')}</ul>` : ''}`).join(''), null, false) : ''}
         ${job.planCritique ? fold(`Bağımsız plan eleştirisi · ${job.planCritique.verdict === 'solid' ? 'sağlam' : 'düzeltildi'}`, `<p class="summary-text">${esc(job.planCritique.summary)}</p><ul class="bullets">${(job.planCritique.findings || []).map((f) => `<li><span class="badge ${f.severity === 'high' ? 'err' : f.severity === 'medium' ? 'warn' : ''}">${esc(f.severity)}</span> ${esc(f.problem)}</li>`).join('')}</ul><div class="hint">Bulgular planın son haline işlendi.</div>`, (job.planCritique.findings || []).length, false) : ''}
       </div>`;
 }
@@ -467,7 +468,7 @@ function renderPlanActions() {
   } else if (mode === 'approve') {
     const qs = job.plan.questions || [];
     el.innerHTML = `<div class="approve-box">
-        ${qs.length ? `<div class="questions sec"><div class="sec-title">Gemini'nin soruları <span class="count"></span></div>
+        ${qs.length ? `<div class="questions sec"><div class="sec-title">${esc(managerOf(state.settings).name)}'in soruları <span class="count"></span></div>
           ${qs.map((q, i) => `<div class="question"><label for="q${i}">${esc(q)}</label><input id="q${i}" data-q="${i}" placeholder="Varsayılan kullanılır" /></div>`).join('')}</div>` : ''}
         <textarea id="feedback" rows="2" placeholder="Plan için not (isteğe bağlı)"></textarea>
         <div class="approve-actions">

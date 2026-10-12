@@ -47,6 +47,10 @@ const FINDING_LABEL = { bug: 'hata', refactor: 'refactor', design: 'tasarım' };
 const SEV_LABEL = { critical: 'kritik', high: 'yüksek', medium: 'orta', low: 'düşük' };
 const AGENT_SHORT = { claude: 'Claude', codex: 'Codex' };
 const SRC_LABEL = { gemini: 'Gemini', test: 'Test', system: 'Sonda', review: 'Denetçi' };
+// Yönetici (ürün tanımı, plan onayı, son kabul, rapor): Gemini ya da Claude API. Etiketler seçime göre yazılır.
+const managerOf = (s) => (s?.managerBy === 'anthropic'
+  ? { id: 'anthropic', name: 'Claude API', model: s.anthropicModel, has: !!s.hasAnthropicKey, invalid: !!s.anthropicKeyInvalid }
+  : { id: 'gemini', name: 'Gemini', model: s?.geminiModel, has: !!s?.hasGeminiKey, invalid: !!s?.geminiKeyInvalid });
 
 const state = {
   settings: null,
@@ -119,4 +123,4 @@ const busyHere = () => !!state.job && state.running.has(state.job.id);
 const dirBusy = (dir) => state.history.some((j) => state.running.has(j.id) && normDir(j.projectDir) === normDir(dir));
 const isLiveJob = () => busyHere() && ACTIVE.has(state.job.phase);
 
-export { api, $, $$, esc, md, firstLine, stIcon, IS_MAC, PHASES, ACTIVE, TASK_STATUS, AGENT_LABEL, KIND_LABEL, FINDING_LABEL, SEV_LABEL, AGENT_SHORT, SRC_LABEL, state, toast, attempt, baseName, ico, semverOf, fmtSize, fmtTime, fmtDur, relDate, normDir, busyHere, dirBusy, isLiveJob };
+export { api, $, $$, esc, md, firstLine, stIcon, IS_MAC, PHASES, ACTIVE, TASK_STATUS, AGENT_LABEL, KIND_LABEL, FINDING_LABEL, SEV_LABEL, AGENT_SHORT, SRC_LABEL, managerOf, state, toast, attempt, baseName, ico, semverOf, fmtSize, fmtTime, fmtDur, relDate, normDir, busyHere, dirBusy, isLiveJob };

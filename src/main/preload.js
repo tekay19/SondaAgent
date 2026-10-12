@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('sonda', {
   saveSettings: (patch) => call('settings:save', patch),
   listModels: () => call('gemini:models'),
   testGemini: () => call('gemini:test'),
+  listAnthropicModels: () => call('anthropic:models'),
+  testAnthropic: () => call('anthropic:test'),
   // Ajan bağlantıları: algıla → kur → giriş yap → test et
   detectAgents: (opts) => call('agents:detect', opts),
   agentAuth: (id) => call('agents:auth', id),

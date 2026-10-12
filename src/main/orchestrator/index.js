@@ -5,6 +5,7 @@
 // göre aynı klasördeki parçalarda tanımlıdır ve sınıfa eklenir: planning, maintenance, pipeline, task, review, findings.
 const settings = require('../settings');
 const gemini = require('../gemini');
+const anthropic = require('../anthropic');
 const agents = require('../agents');
 const project = require('../project');
 const jobs = require('../jobs');
@@ -12,6 +13,7 @@ const procs = require('../procs');
 const secrets = require('../secrets');
 const envfile = require('../envfile');
 const net = require('../net');
+const P = require('../prompts');
 const { claudeModelOf, claudeModelLabel, briefModelOf } = require('../models');
 const { ACTIVE_TASK, guessLang, mixin } = require('./shared');
 
@@ -70,7 +72,11 @@ class Orchestrator {
 
   log(src, lvl, text) {
     if (!this.job || text == null) return;
-    const entry = { t: Date.now(), src, lvl, text: this.redactor()(String(text)) };
+    let line = String(text);
+    // Yönetici Claude API iken günlükte Gemini adı geçmez: Sonda'da Gemini yalnızca yönetici rolündedir, o rolü de
+    // şu an Claude API yapıyor (bir adımı yapmayanın adı yazılmaz). Kaynak fark etmez: Sonda satırları da aynı rolden söz eder.
+    if (settings.managerBy() === 'anthropic') line = line.replace(/\bGemini\b/g, 'Claude API');
+    const entry = { t: Date.now(), src, lvl, text: this.redactor()(line) };
     jobs.appendLog(this.job.id, entry);
     this.emit({ type: 'log', jobId: this.job.id, entry });
   }
@@ -299,17 +305,22 @@ class Orchestrator {
     let lastLog = 0;
     // Kullanıcının gizli değerleri (diff, dosya içeriği, test çıktısı içinde olsa bile) Gemini'ye gitmez.
     const red = this.redactor();
+    // Yönetici: Gemini (varsayılan) ya da Claude API. İkisi aynı sözleşmeyi taşır; yalnızca anahtar, model, şema
+    // biçimi (Claude standart JSON Schema ister) ve kullanım sayacı değişir.
+    const viaClaude = s.managerBy === 'anthropic';
+    const client = viaClaude ? anthropic : gemini;
     const args = {
-      apiKey: s.geminiKey,
-      model: s.geminiModel,
+      apiKey: viaClaude ? s.anthropicKey : s.geminiKey,
+      model: viaClaude ? s.anthropicModel : s.geminiModel,
       system: system && red(system),
       parts: (parts || []).map((p) => (typeof p?.text === 'string' ? { ...p, text: red(p.text) } : p)),
-      schema,
+      schema: viaClaude && schema ? P.toJsonSchema(schema) : schema,
       temperature,
       maxOutputTokens,
       signal: this.signal,
       onUsage: (u) => {
-        this.job.stats.geminiTokens += u.totalTokenCount || 0;
+        if (viaClaude) this.job.stats.managerTokens = (this.job.stats.managerTokens || 0) + (u.totalTokenCount || 0);
+        else this.job.stats.geminiTokens += u.totalTokenCount || 0;
       },
       onProgress: (chars) => {
         if (!progressLabel || Date.now() - lastLog < 8000) return;
@@ -320,10 +331,10 @@ class Orchestrator {
     // İstemcinin kendi yeniden denemeleri (~4 dk) bağlantı kesintisine yetmediyse bağlantı beklenir.
     for (let offline = 1; ; offline++) {
       try {
-        return await gemini.generate(args);
+        return await client.generate(args);
       } catch (e) {
-        if (this.signal?.aborted || offline > MAX_OFFLINE_RETRIES || !gemini.isNetworkError(e)) throw e;
-        await this.awaitNetwork('Gemini', net.HOSTS.gemini, e.message, offline);
+        if (this.signal?.aborted || offline > MAX_OFFLINE_RETRIES || !client.isNetworkError(e)) throw e;
+        await this.awaitNetwork(viaClaude ? 'Claude API' : 'Gemini', viaClaude ? net.HOSTS.claude : net.HOSTS.gemini, e.message, offline);
       }
     }
   }
@@ -438,6 +449,11 @@ class Orchestrator {
         this.log('review', 'warn', 'İnceleyiciler çalışırken dosyalar değişti; değişiklikler geri alındı.');
       }
     }
+  }
+
+  // Yönetici ve modeli (günlükte açıkça görünsün): "Gemini: <model>" ya da "Claude API: <model>".
+  managerNote(s) {
+    return s.managerBy === 'anthropic' ? `Claude API: ${s.anthropicModel}` : `Gemini: ${s.geminiModel}`;
   }
 
   // Kullanılan Claude modeli ve düşünme seviyesi (günlükte açıkça görünsün).

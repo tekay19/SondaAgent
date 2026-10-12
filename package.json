@@ -1,7 +1,7 @@
 {
   "name": "sonda-agent",
   "productName": "Sonda Agent",
-  "version": "1.4.3",
+  "version": "1.5.1",
   "description": "Gemini planlar ve denetler, Claude Code / Codex kodlar, Sonda Agent test eder.",
   "main": "src/main/main.js",
   "author": "Semih",
@@ -12,6 +12,7 @@
     "dist:mac": "electron-builder --mac --publish never",
     "dist:win": "electron-builder --win --publish never",
     "pack": "electron-builder --dir",
+    "pretest": "node -e \"require('electron')\"",
     "test": "node --test \"test/*.test.js\"",
     "lint": "eslint ."
   },

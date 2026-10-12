@@ -1,5 +1,5 @@
 // Ajan durumu ve bağlantı: kurulum → giriş → model testi.
-import { stIcon, api, $, esc, AGENT_LABEL, AGENT_SHORT, state, toast, attempt, ico, semverOf } from './core.js';
+import { stIcon, api, $, esc, AGENT_LABEL, AGENT_SHORT, managerOf, state, toast, attempt, ico, semverOf } from './core.js';
 import { show } from './history.js';
 import { KLOADER } from './theme.js';
 import { renderReadiness } from './compose.js';
@@ -15,7 +15,10 @@ async function refreshAgents(force = false) {
 
 function renderAgentStatus() {
   const s = state.settings;
-  const items = [`<span class="as" title="Gemini ${esc(s?.geminiModel || '')}${s?.hasGeminiKey ? '' : ' — API anahtarı yok'}"><span class="dot ${s?.hasGeminiKey ? 'done' : 'failed'}"></span>Gemini</span>`];
+  const mgr = managerOf(s);
+  const items = [`<span class="as" title="${esc(mgr.name)} ${esc(mgr.model || '')}${mgr.has ? '' : ' — API anahtarı yok'}"><span class="dot ${mgr.has ? 'done' : 'failed'}"></span>${esc(mgr.name)}</span>`];
+  const tab = document.querySelector('[data-f="gemini"]');
+  if (tab) tab.textContent = mgr.name;
   for (const a of Object.values(state.agents || {})) {
     // Codex isteğe bağlıdır: kurulu değilse ve seçili ajan da değilse durum satırını kalabalıklaştırmaz.
     if (a.id !== 'claude' && !a.found && state.compose.agent !== a.id) continue;

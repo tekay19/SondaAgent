@@ -299,7 +299,7 @@ ${(review.issues || []).map((i) => `- Açık: ${i}`).join('\n')}`);
     this.log(src, 'info', `${who} proje hafızasını güncelliyor…`);
     try {
       const viaGemini = () => this.gem({ system: P.MEMORY_SYSTEM, parts: [{ text: P.memoryUserText({ job, task, diff }) }], schema: P.MEMORY_SCHEMA, temperature: 0.2 });
-      const r = byAgent ? (await this.agentMemory(task, diff)) || (settings.get().geminiKey ? await viaGemini() : null) : await viaGemini();
+      const r = byAgent ? (await this.agentMemory(task, diff)) || (settings.managerReady(settings.get()) ? await viaGemini() : null) : await viaGemini();
       if (r?.memory?.trim()) {
         job.memory = r.memory.trim();
         job.carryOver = (r.carryOver || []).filter(Boolean).slice(0, 30);
