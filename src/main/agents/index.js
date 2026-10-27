@@ -14,11 +14,13 @@ const run = require('./run');
 
 module.exports = {
   agentRunEnv: run.agentRunEnv,
+  opencodeDataHome: run.opencodeDataHome,
   ADAPTERS: adapters.ADAPTERS,
   CODE_TOOLS: adapters.CODE_TOOLS,
   DEFAULT_CLAUDE_MODEL,
   detect: detect.detect,
   authInfo: detect.authInfo,
+  opencodeCredentials: detect.opencodeCredentials,
   runAgent: run.runAgent,
   resolveBin: install.resolveBin,
   install: install.install,

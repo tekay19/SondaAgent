@@ -71,7 +71,7 @@ class Findings {
     this.update();
   }
 
-  // Yöneticinin (Gemini) bulguları: uzman bulguları gibi kodda doğrulanmaya gider.
+  // Yöneticinin bulguları: uzman bulguları gibi kodda doğrulanmaya gider.
   managerFindings(review) {
     return (review.findings || []).filter((f) => f.severity !== 'low').slice(0, 15).map((f) => ({ ...f, area: 'manager', ...panelLib.parseFileRef(f.file, f.line) }));
   }

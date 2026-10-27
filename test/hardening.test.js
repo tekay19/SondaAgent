@@ -328,7 +328,7 @@ function orch(job = {}) {
   const { Orchestrator } = require('../src/main/orchestrator');
   const events = [];
   const o = new Orchestrator({ emit: (e) => events.push(e) });
-  o.job = { id: 'mun446n8-aaaaaa', idea: 'Bir görev uygulaması yap', projectDir: tmp(), agent: 'claude', tasks: [], userNotes: [], stats: { agentRuns: 0, costUsd: 0, geminiTokens: 0 }, plan: { requirements: [{ id: 'R1', text: 'a' }, { id: 'R2', text: 'b' }], language: 'English' }, ...job };
+  o.job = { id: 'mun446n8-aaaaaa', idea: 'Bir görev uygulaması yap', projectDir: tmp(), agent: 'claude', tasks: [], userNotes: [], stats: { agentRuns: 0, costUsd: 0, managerTokens: 0 }, plan: { requirements: [{ id: 'R1', text: 'a' }, { id: 'R2', text: 'b' }], language: 'English' }, ...job };
   o.log = () => {};
   return { o, events };
 }
@@ -337,7 +337,7 @@ test('İnceleme kapıları: eksik gereksinim ve inceleyicinin başarısız testi
   const { o } = orch();
   const pass = { verdict: 'pass', summary: 'iyi', issues: [], acceptanceChecks: [], requirementChecks: [], qualityScore: 9, fixInstructions: '' };
   assert.strictEqual(o.normalizeReview(pass, []).verdict, 'pass');
-  // Gemini "onay" dese de kapsamındaki gereksinim eksikse düzeltme açılır.
+  // Yönetici "onay" dese de kapsamındaki gereksinim eksikse düzeltme açılır.
   const r1 = o.normalizeReview({ ...pass, requirementChecks: [{ id: 'R2', status: 'missing', evidence: 'rota yok' }] }, []);
   assert.strictEqual(r1.verdict, 'fix');
   assert.match(r1.issues[0], /Gereksinim karşılanmadı: R2 — rota yok/);
@@ -374,7 +374,7 @@ test('Paralel adımlar: biri hata verince diğerleri durdurulur ve iş gerçek h
       };
       o.guarded(async () => {
         await o.together([
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Gemini 503: geçici hata')), 20)),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Yönetici 503: geçici hata')), 20)),
           new Promise((_, reject) => o.signal.addEventListener('abort', () => {
             siblingAborted = true;
             reject(new Error('Durduruldu'));
@@ -384,7 +384,7 @@ test('Paralel adımlar: biri hata verince diğerleri durdurulur ve iş gerçek h
     });
     assert.ok(siblingAborted, 'kardeş adım durdurulmalı');
     assert.strictEqual(o.job.phase, 'failed', 'kullanıcı durdurmadı: "durduruldu" değil "hata"');
-    assert.strictEqual(o.job.error, 'Gemini 503: geçici hata');
+    assert.strictEqual(o.job.error, 'Yönetici 503: geçici hata');
     assert.strictEqual(o.job.tasks[0].status, 'failed');
     assert.strictEqual(o.running, false);
     assert.ok(events.some((e) => e.type === 'busy' && e.busy === true));
@@ -419,7 +419,8 @@ test('Paralel adımlar: biri hata verince diğerleri durdurulur ve iş gerçek h
 
 test('Bağlantı kesintisi: adım başarısız sayılmaz, bağlantı gelince aynı oturumdan sürer; gelmezse iş açık hatayla durur', async () => {
   const agents = require('../src/main/agents');
-  const gemini = require('../src/main/gemini');
+  const claudecli = require('../src/main/claudecli');
+  const anthropic = require('../src/main/anthropic');
   const net = require('../src/main/net');
   const jobs = require('../src/main/jobs');
   // Başarısız oturumun türü: giriş sorunu > kullanım limiti > bağlantı > sıradan hata.
@@ -434,13 +435,13 @@ test('Bağlantı kesintisi: adım başarısız sayılmaz, bağlantı gelince ayn
   assert.strictEqual(kind('Failed to authenticate: OAuth session expired (connection error)'), 'auth');
   assert.strictEqual(kind('error_max_turns'), 'error');
   assert.strictEqual(kind('Tests failed: 3 of 20'), 'error');
-  // Gemini: bağlantı ve ağ geçidi hataları bağlantı sorunudur; kota ve model hataları değildir.
-  assert.ok(gemini.isNetworkError(Object.assign(new TypeError('Gemini bağlantı hatası: getaddrinfo ENOTFOUND'), { network: true })));
-  assert.ok(gemini.isNetworkError({ status: 503 }));
-  assert.ok(!gemini.isNetworkError({ status: 429 }) && !gemini.isNetworkError(new TypeError('x is not a function')) && !gemini.isNetworkError(new SyntaxError('JSON')));
+  // Yönetici istemcileri: bağlantı ve ağ geçidi hataları bağlantı sorunudur; kota ve model hataları değildir.
+  assert.ok(claudecli.isNetworkError(Object.assign(new Error('Claude bağlantı hatası: getaddrinfo ENOTFOUND'), { network: true })));
+  assert.ok(anthropic.isNetworkError({ status: 503 }));
+  assert.ok(!anthropic.isNetworkError({ status: 429 }) && !claudecli.isNetworkError(new TypeError('x is not a function')) && !claudecli.isNetworkError(new SyntaxError('JSON')));
 
   jobs._setRoot(tmp());
-  const saved = { run: agents.runAgent, wait: net.waitOnline, gen: gemini.generate };
+  const saved = { run: agents.runAgent, wait: net.waitOnline, gen: claudecli.generate };
   const OFFLINE = { ok: false, offline: true, error: "API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)", sessionId: 'sess-1', costUsd: 1 };
   const make = (results) => {
     const { o } = orch();
@@ -495,28 +496,28 @@ test('Bağlantı kesintisi: adım başarısız sayılmaz, bağlantı gelince ayn
     assert.throws(() => d.o.checkAbort(), /Durduruldu/);
     assert.deepStrictEqual([d.o.job.waitUntil, d.o.job.waitKind], [null, null]);
 
-    // Gemini: istemcinin kendi denemeleri yetmediyse bağlantı beklenir ve çağrı yinelenir.
+    // Yönetici (Claude CLI): istemcinin kendi denemeleri yetmediyse bağlantı beklenir ve çağrı yinelenir.
     net.waitOnline = async (host) => {
       probed.push(host);
       return true;
     };
     const g = make([]);
     let n = 0;
-    gemini.generate = async () => {
-      if (n++ === 0) throw Object.assign(new TypeError('Gemini bağlantı hatası: getaddrinfo ENOTFOUND generativelanguage.googleapis.com'), { network: true });
+    claudecli.generate = async () => {
+      if (n++ === 0) throw Object.assign(new Error('Claude bağlantı hatası: getaddrinfo ENOTFOUND api.anthropic.com'), { network: true });
       return { verdict: 'approve' };
     };
     assert.deepStrictEqual(await g.o.gem({ system: 's', parts: [{ text: 'p' }] }), { verdict: 'approve' });
-    assert.strictEqual(probed[probed.length - 1], 'generativelanguage.googleapis.com');
-    assert.ok(g.o.logs.some((l) => /^system\/warn: Gemini sunucusuna ulaşılamadı/.test(l)) && g.o.logs.some((l) => /Bağlantı var; devam ediliyor/.test(l)));
+    assert.strictEqual(probed[probed.length - 1], 'api.anthropic.com');
+    assert.ok(g.o.logs.some((l) => /^system\/warn: Claude CLI sunucusuna ulaşılamadı/.test(l)) && g.o.logs.some((l) => /Bağlantı var; devam ediliyor/.test(l)));
     // Kota hatası bağlantı sorunu değildir: beklenmez, olduğu gibi yukarı taşınır.
-    gemini.generate = async () => {
-      throw Object.assign(new Error('Gemini 429: quota'), { status: 429 });
+    claudecli.generate = async () => {
+      throw Object.assign(new Error('Claude CLI 429: quota'), { status: 429 });
     };
     const before = probed.length;
     await assert.rejects(() => g.o.gem({ system: 's', parts: [] }), /429/);
     assert.strictEqual(probed.length, before);
-    // Planlama: bağlantı ya da limit sorunu Gemini planlayıcıya düşürmez; iş o hatayla durur ("Sürdür" ile sürer).
+    // Planlama: bağlantı ya da limit sorunu yönetici planlayıcıya düşürmez; iş o hatayla durur ("Sürdür" ile sürer).
     const pl = make([]);
     pl.o.reviewerId = () => 'claude';
     const planArgs = { baseV: 'b', head: { projectName: 'p', summary: 's', stack: [], language: 'Turkish', assumptions: [], threatModel: [], requirements: [] }, uncoveredOf: () => [], thinOf: () => [], cleanMd: (t) => t };
@@ -526,7 +527,7 @@ test('Bağlantı kesintisi: adım başarısız sayılmaz, bağlantı gelince ayn
       };
       await assert.rejects(() => pl.o.claudePlan(planArgs), new RegExp(msg.slice(0, 24).replace(/[|]/g, '.')));
     }
-    // Kullanılabilir plan gelmediyse (oturum çöktü, biçimsiz yanıt) Gemini planlayıcı yedektir.
+    // Kullanılabilir plan gelmediyse (oturum çöktü, biçimsiz yanıt) yönetici planlayıcı yedektir.
     pl.o.runAgent = async () => {
       throw new Error('Claude Code başlatılamadı: spawn EACCES');
     };
@@ -540,12 +541,12 @@ test('Bağlantı kesintisi: adım başarısız sayılmaz, bağlantı gelince ayn
       waits.push(host);
       return true;
     };
-    await Promise.all([p.o.awaitNetwork('Claude Code', 'api.anthropic.com', 'ENOTFOUND', 1), p.o.awaitNetwork('Claude Code', 'api.anthropic.com', 'ENOTFOUND', 1), p.o.awaitNetwork('Gemini', 'generativelanguage.googleapis.com', 'ENOTFOUND', 1)]);
+    await Promise.all([p.o.awaitNetwork('Claude Code', 'api.anthropic.com', 'ENOTFOUND', 1), p.o.awaitNetwork('Claude Code', 'api.anthropic.com', 'ENOTFOUND', 1), p.o.awaitNetwork('Claude CLI', 'api.anthropic.com', 'ENOTFOUND', 1)]);
     assert.deepStrictEqual([waits.length, p.o.logs.filter((l) => /ulaşılamadı/.test(l)).length, p.o.netWait], [1, 1, null]);
   } finally {
     agents.runAgent = saved.run;
     net.waitOnline = saved.wait;
-    gemini.generate = saved.gen;
+    claudecli.generate = saved.gen;
     jobs.flushAll();
     jobs._setRoot(null);
   }
@@ -731,7 +732,7 @@ test('Doğrulama: "! komut" hata vermeli; başarılı biterse, zaman aşımına 
 });
 
 // ---------- tasarım dosyaları ----------
-test('Tasarım ekleri: klasör ve HTML/CSS tasarım sayılır, projeye docs/sonda/design altına kopyalanır, Gemini kaynakları metin olarak görür', async () => {
+test('Tasarım ekleri: klasör ve HTML/CSS tasarım sayılır, projeye docs/sonda/design altına kopyalanır, yönetici kaynakları metin olarak görür', async () => {
   const docs = require('../src/main/docs');
   const P = require('../src/main/prompts');
   const src = tmp();
@@ -771,8 +772,8 @@ test('Tasarım ekleri: klasör ve HTML/CSS tasarım sayılır, projeye docs/sond
   // İkinci yazma aynı sonucu verir (üst üste kopya yok), "_onizleme" adı tasarım dosyasına verilmez.
   assert.deepStrictEqual(docs.writeDesign(proj, clean).refs, w.designRefs);
   assert.deepStrictEqual(docs.writeDesign(proj, [{ path: path.join(src, 'landing.html'), name: '_onizleme', kind: 'text', role: 'design' }]).refs, ['docs/sonda/design/_onizleme-2']);
-  // Gemini parçaları: klasör kaynakları metin (sayfalar önce), etiketler tasarım/doküman ayrımını taşır.
-  const parts = await docs.toGeminiParts(clean);
+  // Yönetici istem parçaları: klasör kaynakları metin (sayfalar önce), etiketler tasarım/doküman ayrımını taşır.
+  const parts = await docs.toManagerParts(clean);
   const texts = parts.filter((p) => p.text).map((p) => p.text);
   const idxIndex = texts.findIndex((t) => t.startsWith('\n===== DESIGN FILE: site/index.html'));
   const idxCss = texts.findIndex((t) => t.startsWith('\n===== DESIGN FILE: site/css/style.css'));
@@ -786,7 +787,7 @@ test('Tasarım ekleri: klasör ve HTML/CSS tasarım sayılır, projeye docs/sond
   docs.writeRequest(proj, { id: 'j1', idea: 'landing', attachments: clean });
   assert.match(fs.readFileSync(path.join(proj, 'docs', 'sonda', 'REQUEST.md'), 'utf8'), /Ekli tasarım dosyaları \(arayüzün görünümünü belirler\): docs\/sonda\/design\/site\/, docs\/sonda\/design\/landing\.html/);
 
-  // İstemler: planlayıcı, kodlayan ajan ve inceleyiciler tasarımı bağlayıcı görür; önizlemeler Gemini'ye satır içi gider.
+  // İstemler: planlayıcı, kodlayan ajan ve inceleyiciler tasarımı bağlayıcı görür; önizlemeler yöneticiye satır içi gider.
   fs.mkdirSync(path.join(proj, 'docs', 'sonda', 'design', '_onizleme'), { recursive: true });
   fs.writeFileSync(path.join(proj, 'docs', 'sonda', 'design', '_onizleme', 'site-index-masaustu.jpg'), Buffer.from([0xff, 0xd8, 0xff]));
   const task = { id: 't1', phase: 'Faz 1', title: 'Landing', goal: 'g', details: 'd', acceptance: [], tests: [], covers: ['R1'], status: 'pending' };
@@ -818,7 +819,7 @@ test('Tasarım ekleri: klasör ve HTML/CSS tasarım sayılır, projeye docs/sond
   assert.match(finalParts[0].text, /# Design fidelity/);
 });
 
-test('Tasarım verilmediğinde: Gemini tasarım yönü yazar, ajan ona göre kurar, klişe "AI şablonu" yasak, inceleyiciler ölçüt olarak kullanır', () => {
+test('Tasarım verilmediğinde: yönetici tasarım yönü yazar, ajan ona göre kurar, klişe "AI şablonu" yasak, inceleyiciler ölçüt olarak kullanır', () => {
   const P = require('../src/main/prompts');
   const { Orchestrator } = require('../src/main/orchestrator');
   assert.ok(P.REQUIREMENTS_SCHEMA.required.includes('designDirection'));

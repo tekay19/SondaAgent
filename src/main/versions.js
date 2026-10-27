@@ -1,5 +1,5 @@
 // Planlamadan önce kullanılacak kütüphanelerin güncel sürümlerini npm kayıt defterinden alır.
-// Gemini'nin eğitim verisindeki eski API'lerle (ör. Tailwind 3, Zod 3) şartname yazmasını önler.
+// Modelin eğitim verisindeki eski API'lerle (ör. Tailwind 3, Zod 3) şartname yazmasını önler.
 const REGISTRY = 'https://registry.npmjs.org';
 
 // Paket → isteğin/stack'in metninde geçtiğini gösteren ifade.

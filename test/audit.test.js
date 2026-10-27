@@ -27,7 +27,7 @@ function harness({ tasks, suggestions = [], verdicts = () => 'confirmed', rechec
   project.fileTree = () => 'src/';
   agents.resolveBin = (id) => (id === 'claude' ? '/usr/local/bin/claude' : null);
   const o = new Orchestrator({ emit: () => {} });
-  o.job = { id: 'mun446n8-denetim', idea: 'x', projectDir: tmp(), agent: 'claude', tasks, userNotes: ['Türkçe arayüz'], suggestions: [], stats: { agentRuns: 0, costUsd: 0, geminiTokens: 0 }, plan: { summary: 'Özet', stack: ['Python'], requirements: [], language: 'Turkish', verify: {} } };
+  o.job = { id: 'mun446n8-denetim', idea: 'x', projectDir: tmp(), agent: 'claude', tasks, userNotes: ['Türkçe arayüz'], suggestions: [], stats: { agentRuns: 0, costUsd: 0, managerTokens: 0 }, plan: { summary: 'Özet', stack: ['Python'], requirements: [], language: 'Turkish', verify: {} } };
   o.logs = [];
   o.log = (src, lvl, text) => o.logs.push(`${src}/${lvl}: ${text}`);
   o.useGit = true;

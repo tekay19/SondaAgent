@@ -8,10 +8,11 @@ function logVisible(e) {
   const f = state.logFilter;
   if (f === 'all' || e.lvl === 'step') return true;
   if (f === 'problems') return e.lvl === 'warn' || e.lvl === 'error';
-  return e.src === f;
+  // Eski işlerin günlüğünde yönetici kaynağı "gemini" adıyla kayıtlıdır.
+  return e.src === f || (f === 'manager' && e.src === 'gemini');
 }
 function srcLabel(src) {
-  if (src === 'gemini') return managerOf(state.settings).name;
+  if (src === 'manager' || src === 'gemini') return managerOf(state.settings).name;
   return src === 'agent' ? AGENT_SHORT[state.job?.agent] || 'Ajan' : SRC_LABEL[src] || src;
 }
 // Satır başındaki ✓ / ✗ işaretleri durum baklavasına çevrilir (✓ bitti, ✗ olmadı).

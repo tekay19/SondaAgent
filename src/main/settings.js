@@ -1,28 +1,59 @@
-// Ayarlar: userData/settings.json. Gemini API anahtarı işletim sisteminin
-// anahtar zinciriyle (macOS Keychain / Windows DPAPI) şifrelenerek saklanır.
+// Ayarlar: userData/settings.json. API anahtarları işletim sisteminin anahtar zinciriyle (macOS Keychain /
+// Windows DPAPI) şifrelenerek saklanır.
 const { app, safeStorage } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { DEFAULT_STANDARDS } = require('./prompts');
-const { DEFAULT_CLAUDE_MODEL, CLAUDE_MODELS, claudeModelOf, claudeModelLabel } = require('./models');
+const { DEFAULT_CLAUDE_MODEL, CLAUDE_MODELS, claudeModelOf, claudeModelLabel, roleModelOf } = require('./models');
 const { writeFileAtomic, readStore } = require('./fsx');
 
 const DEFAULTS = {
-  geminiModel: 'gemini-pro-latest',
-  // "Yönetici" (ürün tanımı, plan onayı, son kabul, rapor) kim olsun: gemini | anthropic (Claude API anahtarı).
+  // "Yönetici" (ürün tanımı, plan onayı, son kabul, rapor) kim olsun: claudecli (Claude Code CLI, abonelikle;
+  // varsayılan — anahtar gerekmez) | anthropic (Claude API anahtarı) | local (bilgisayardaki OpenAI uyumlu sunucu:
+  // Ollama, LM Studio, llama.cpp…) | nim (NVIDIA NIM API) | opencode (OpenCode CLI, kendi sağlayıcı anahtarlarıyla).
   // Kodlayan ve inceleyen Claude oturumları bundan bağımsızdır: onlar hep Claude CLI ve abonelikle çalışır.
-  managerBy: 'gemini',
+  managerBy: 'claudecli',
+  // Claude CLI yöneticisinin modeli; boşsa Modeller'deki kodlayıcı Claude modeli (Opus 5.5).
+  managerClaudeModel: '',
   // Yönetici işleri (onay, son kabul, rapor) için çok pahalı olmayan model; daha ucuzu: claude-haiku-4-5-20251001.
   anthropicModel: 'claude-sonnet-5-5',
+  // Yerel model sunucusu (OpenAI uyumlu): adres, model adı ve (sunucu isterse) anahtar.
+  localBaseUrl: 'http://localhost:11434/v1',
+  localModel: '',
+  // NVIDIA NIM (build.nvidia.com) ya da başka bir harici OpenAI uyumlu API: adres, model ve anahtar (şifreli).
+  nimBaseUrl: 'https://integrate.api.nvidia.com/v1',
+  nimModel: '',
+  // Codex NIM ile kodlarken rol başına NIM modeli (boş = nimModel): planlayıcı, kodlayıcı, inceleyici.
+  nimPlannerModel: '',
+  nimCoderModel: '',
+  nimReviewerModel: '',
   defaultAgent: 'claude',
   claudeModel: '', // boş = varsayılan (Opus 5.5); bkz. models.js
+  // Rol başına model (boş = Ajanlar'daki genel Claude modeli; brif için boş = briefBy'a göre Fable 5.1 / kodlama modeli).
+  plannerModel: '',
+  coderModel: '',
+  reviewerModel: '',
+  briefModel: '',
   claudeEffort: 'high', // '' | low | medium | high | xhigh | max
   reviewEffort: 'medium', // derin inceleme oturumları için (hız)
   claudePermission: 'full', // full | safe
   claudePath: '',
+  // Kullanıcının kişisel Claude Code ayarları (~/.claude: CLAUDE.md, hafıza, eklentiler, hook'lar) ajan oturumlarına
+  // yüklensin mi. Kapalı (varsayılan): her oturuma yalnızca projenin kendi CLAUDE.md'si girer; kişisel talimatlar
+  // ve eklenti tanımları her oturumun bağlamına binlerce token ekliyor ve otonom işe karışabiliyordu.
+  claudeUserSettings: false,
   codexModel: '',
   codexPermission: 'full', // full | safe
   codexPath: '',
+  // Codex hangi sağlayıcıyla kodlasın: openai (hesap girişi) | local (codex --oss: Ollama / LM Studio) | nim (NVIDIA NIM API).
+  codexProvider: 'openai',
+  codexLocalProvider: 'ollama', // ollama | lmstudio
+  // OpenCode: model "sağlayıcı/model" biçiminde (boş = OpenCode'un varsayılanı); salt okunur oturumlar için ayrı model.
+  opencodeModel: '',
+  opencodeReviewModel: '',
+  // OpenCode yöneticisinin modeli (managerBy: opencode); boşsa kodlayıcı OpenCode modeli.
+  opencodeManagerModel: '',
+  opencodePath: '',
   maxFixAttempts: 2,
   finalFixAttempts: 3,
   verifyEachTask: true,
@@ -38,12 +69,15 @@ const DEFAULTS = {
   // doğrulanan önerileri sonraki görevden önce uygulatır (bkz. orchestrator/audit.js).
   independentAudit: true,
   auditEvery: 3,
-  planner: 'claude', // claude: Claude mühendis planlar, Gemini yönetici onaylar | gemini: Gemini planlar, Claude eleştirir
-  // Gemini'nin rolü. manager: ürün tanımı, plan onayı ve teslim (son kabul + rapor) — yapım döngüsünü (brif, görev
-  // incelemesi, hafıza, faz kapısı) ajanlar yürütür. full: Gemini her görevi ve fazı da inceler, hafızayı yazar.
-  geminiRole: 'manager',
-  // Teknik brifi kim yazar. fable: Claude Fable 5.1 (kodu gezerek) | coder: kodlama modeliyle Claude | gemini
+  planner: 'claude', // claude: Claude mühendis planlar, yönetici onaylar | manager: yönetici planlar, Claude eleştirir
+  // Yöneticinin rolü. manager: ürün tanımı, plan onayı ve teslim (son kabul + rapor) — yapım döngüsünü (brif, görev
+  // incelemesi, hafıza, faz kapısı) ajanlar yürütür. full: yönetici her görevi ve fazı da inceler, hafızayı yazar.
+  managerRole: 'manager',
+  // Teknik brifi kim yazar. fable: Claude Fable 5.1 (kodu gezerek) | coder: kodlama modeliyle Claude
   briefBy: 'fable',
+  // Salt okunur oturumları (plan yazımı, brif, incelemeler, uzmanlar, doğrulama, hafıza) kim yapar: auto → Claude kuruluysa
+  // Claude, değilse kodlayan ajan | agent → her zaman kodlayan ajan (Claude'suz çalışma: Codex + NIM / yerel model).
+  reviewerBy: 'auto',
   tddMode: false,
   claudeAllowMcp: false,
   gitCommit: true,
@@ -58,18 +92,26 @@ const DEFAULTS = {
 // Seçenekli ayarların geçerli değerleri: arayüzden (ya da elle düzenlenmiş dosyadan) gelen başka bir değer yok sayılır.
 const EFFORTS = ['', 'low', 'medium', 'high', 'xhigh', 'max'];
 const ENUMS = {
-  defaultAgent: ['claude', 'codex'],
+  defaultAgent: ['claude', 'codex', 'opencode'],
   claudeEffort: EFFORTS,
   reviewEffort: EFFORTS,
   claudePermission: ['full', 'safe'],
   codexPermission: ['full', 'safe'],
+  codexLocalProvider: ['ollama', 'lmstudio'],
+  codexProvider: ['openai', 'local', 'nim'],
   reviewLevel: ['standard', 'deep', 'max'],
-  planner: ['claude', 'gemini'],
-  managerBy: ['gemini', 'anthropic'],
-  geminiRole: ['manager', 'full'],
-  briefBy: ['fable', 'coder', 'gemini'],
+  planner: ['claude', 'manager'],
+  managerBy: ['claudecli', 'anthropic', 'local', 'nim', 'opencode'],
+  managerRole: ['manager', 'full'],
+  briefBy: ['fable', 'coder'],
+  reviewerBy: ['auto', 'agent'],
   theme: ['system', 'light', 'dark'],
 };
+
+// Eski sürümlerin (Gemini'li) ayar dosyası: adlar ve değerler bugünkü karşılığına çevrilir, Gemini alanları atılır.
+const LEGACY_KEYS = { geminiRole: 'managerRole' };
+const LEGACY_VALUES = { managerBy: { gemini: 'claudecli' }, planner: { gemini: 'manager' }, briefBy: { gemini: 'fable' } };
+const DROPPED_KEYS = new Set(['geminiModel', 'geminiKeyEnc', 'geminiKeyPlain', 'codexLocal']);
 
 // Bir ayar değerini varsayılanının tipine göre doğrular; geçersizse `undefined` (değer değişmez).
 function sanitize(key, value) {
@@ -99,15 +141,30 @@ function load() {
     /* okunamadı: varsayılanlar */
   }
   cache = { ...DEFAULTS };
-  for (const [k, v] of Object.entries(raw && typeof raw === 'object' ? raw : {})) {
-    if (k === 'geminiKeyEnc' || k === 'geminiKeyPlain' || k === 'anthropicKeyEnc' || k === 'anthropicKeyPlain') cache[k] = v;
-    else if (k in DEFAULTS) {
+  for (let [k, v] of Object.entries(raw && typeof raw === 'object' ? raw : {})) {
+    if (k === 'codexLocal' && v === true && !raw.codexProvider) cache.codexProvider = 'local'; // eski onay kutusu
+    if (DROPPED_KEYS.has(k)) continue;
+    if (LEGACY_KEYS[k]) k = LEGACY_KEYS[k];
+    if (LEGACY_VALUES[k] && typeof v === 'string' && LEGACY_VALUES[k][v]) v = LEGACY_VALUES[k][v];
+    if (/^(anthropic|local|nim)Key(Enc|Plain)$/.test(k)) cache[k] = v;
+    else if (k === 'projectStacks') {
+      if (v && typeof v === 'object' && !Array.isArray(v)) cache.projectStacks = v;
+    } else if (k in DEFAULTS) {
       const clean = sanitize(k, v);
       if (clean !== undefined) cache[k] = clean;
     }
   }
-  clampNumbers(cache);
+  normalize(cache);
   return cache;
+}
+
+// Boş bırakılınca çalışmayı bozacak alanlar varsayılanına döner (elle düzenlenmiş dosya ya da temizlenmiş form alanı):
+// Claude API yöneticisinin modeli boşsa istek 400 ile düşerdi; sunucu adresleri boşsa istemci adres üretemezdi.
+function normalize(s) {
+  if (!String(s.anthropicModel || '').trim()) s.anthropicModel = DEFAULTS.anthropicModel;
+  if (!s.localBaseUrl) s.localBaseUrl = DEFAULTS.localBaseUrl;
+  if (!s.nimBaseUrl) s.nimBaseUrl = DEFAULTS.nimBaseUrl;
+  clampNumbers(s);
 }
 
 function persist() {
@@ -128,66 +185,42 @@ function clampNumbers(s) {
 function cleanKey(key) {
   return String(key || '').replace(/[\s\u00A0\u200B-\u200D\u2060\uFEFF]/g, '');
 }
-const isValidKey = (key) => /^[\x21-\x7E]{10,}$/.test(key);
+const isValidKey = (key, min = 10) => new RegExp(`^[\\x21-\\x7E]{${min},}$`).test(key);
+// Anahtarın en az uzunluğu: API anahtarları uzundur; yerel sunucu anahtarı kısa bir dizge olabilir (LM Studio: "lm-studio").
+const KEY_MIN = { anthropic: 10, nim: 10, local: 1 };
 
-let keyInvalid = false;
-
-function getGeminiKey() {
-  const s = load();
-  keyInvalid = false;
-  let key = '';
-  if (s.geminiKeyEnc && safeStorage.isEncryptionAvailable()) {
-    try {
-      key = cleanKey(safeStorage.decryptString(Buffer.from(s.geminiKeyEnc, 'base64')));
-    } catch {
-      key = '';
-    }
-  } else {
-    key = cleanKey(s.geminiKeyPlain || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '');
-  }
-  // Çözülemeyen / bozuk kayıt (ör. eski sürümden taşınmış) hiç kullanılmasın; kullanıcıdan yeniden istenir.
-  if (key && !isValidKey(key)) {
-    keyInvalid = true;
-    return '';
-  }
-  return key;
-}
-
-let anthropicKeyInvalid = false;
+// Şifreli saklanan anahtarlar: anthropic (Claude API), local (yerel sunucu isteğe bağlı anahtar).
+const KEY_LABEL = { anthropic: 'Anthropic API', local: 'Yerel sunucu', nim: 'NVIDIA NIM' };
+const keyInvalid = { anthropic: false, local: false, nim: false };
 
 // Yalnızca Sonda'ya girilen anahtar kullanılır; ANTHROPIC_API_KEY ortam değişkeni bilerek okunmaz (başka bir
 // amaçla ayarlanmış bir anahtar sessizce ayrı faturalanmasın; ajanların ortamından da zaten ayıklanır).
-function getAnthropicKey() {
+function getKey(name) {
   const s = load();
-  anthropicKeyInvalid = false;
+  keyInvalid[name] = false;
   let key = '';
-  if (s.anthropicKeyEnc && safeStorage.isEncryptionAvailable()) {
+  if (s[`${name}KeyEnc`] && safeStorage.isEncryptionAvailable()) {
     try {
-      key = cleanKey(safeStorage.decryptString(Buffer.from(s.anthropicKeyEnc, 'base64')));
+      key = cleanKey(safeStorage.decryptString(Buffer.from(s[`${name}KeyEnc`], 'base64')));
     } catch {
       key = '';
     }
   } else {
-    key = cleanKey(s.anthropicKeyPlain || '');
+    key = cleanKey(s[`${name}KeyPlain`] || '');
   }
-  if (key && !isValidKey(key)) {
-    anthropicKeyInvalid = true;
+  // Çözülemeyen / bozuk kayıt hiç kullanılmasın; kullanıcıdan yeniden istenir.
+  if (key && !isValidKey(key, KEY_MIN[name])) {
+    keyInvalid[name] = true;
     return '';
   }
   return key;
 }
+const getAnthropicKey = () => getKey('anthropic');
 
-function anthropicKeySource() {
+function keySource(name) {
   const s = load();
-  if (s.anthropicKeyEnc) return 'keychain';
-  return s.anthropicKeyPlain ? 'file' : null;
-}
-
-function keySource() {
-  const s = load();
-  if (s.geminiKeyEnc) return 'keychain';
-  if (s.geminiKeyPlain) return 'file';
-  return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY ? 'env' : null;
+  if (s[`${name}KeyEnc`]) return 'keychain';
+  return s[`${name}KeyPlain`] ? 'file' : null;
 }
 
 function mask(key) {
@@ -195,75 +228,85 @@ function mask(key) {
   return key.length <= 10 ? '••••' : `${key.slice(0, 4)}••••${key.slice(-4)}`;
 }
 
-// Ana süreç için tam ayarlar (anahtar dahil).
+// Ana süreç için tam ayarlar (anahtarlar dahil).
 function get() {
-  return { ...load(), geminiKey: getGeminiKey(), anthropicKey: getAnthropicKey() };
+  return { ...load(), anthropicKey: getAnthropicKey(), localApiKey: getKey('local'), nimApiKey: getKey('nim') };
+}
+
+// Anahtarsız ayarlar: anahtar gerektirmeyen sık çağrılar (ajan seçimi, CLI yolu) için; her çağrıda üç anahtar
+// çözülmez (işletim sistemi anahtar zinciri çağrısı).
+function peek() {
+  const { anthropicKeyEnc, anthropicKeyPlain, localKeyEnc, localKeyPlain, nimKeyEnc, nimKeyPlain, ...rest } = load();
+  return rest;
 }
 
 // Arayüze gönderilen ayarlar: ham anahtar yerine maskelenmiş hali.
 function getPublic() {
-  const { geminiKeyEnc, geminiKeyPlain, anthropicKeyEnc, anthropicKeyPlain, ...rest } = load();
-  const key = getGeminiKey();
+  // Proje kadroları arayüze toptan gitmez; yeni iş ekranı seçili klasörünkini sorar (settings:projectStack).
+  const { anthropicKeyEnc, anthropicKeyPlain, localKeyEnc, localKeyPlain, nimKeyEnc, nimKeyPlain, projectStacks, ...rest } = load();
+  const nimKey = getKey('nim');
   const anthropicKey = getAnthropicKey();
+  const localKey = getKey('local');
   const model = claudeModelOf(rest);
   return {
     ...rest,
-    hasGeminiKey: !!key,
-    geminiKeyInvalid: keyInvalid,
-    geminiKeyMasked: mask(key),
-    geminiKeySource: keySource(),
     hasAnthropicKey: !!anthropicKey,
-    anthropicKeyInvalid,
+    anthropicKeyInvalid: keyInvalid.anthropic,
     anthropicKeyMasked: mask(anthropicKey),
-    anthropicKeySource: anthropicKeySource(),
+    anthropicKeySource: keySource('anthropic'),
+    hasLocalKey: !!localKey,
+    localKeyMasked: mask(localKey),
+    hasNimKey: !!nimKey,
+    nimKeyMasked: mask(nimKey),
     defaultStandards: DEFAULT_STANDARDS,
     // Claude modeli: kullanılan model, varsayılan ve Ayarlar'daki seçenekler (arayüz bunları gösterir).
     claudeModelEffective: model,
     claudeModelLabel: claudeModelLabel(model),
     claudeDefaultModel: DEFAULT_CLAUDE_MODEL,
     claudeModels: CLAUDE_MODELS,
+    // Claude CLI yöneticisi: kullanılan model (boş ayar → Ajanlar'daki model).
+    managerClaudeModelEffective: managerClaudeModelOf(rest),
+    managerClaudeModelLabel: claudeModelLabel(managerClaudeModelOf(rest)),
+    managerLabel: managerLabel(rest),
+    // Rollerin kullanacağı modeller (etiketleriyle): arayüz özet satırında gösterir.
+    roleModels: Object.fromEntries(['planner', 'coder', 'reviewer', 'brief'].map((r) => [r, { id: roleModelOf(rest, r), label: claudeModelLabel(roleModelOf(rest, r)) }])),
   };
+}
+
+function storeKey(s, name, key, clear) {
+  if (clear) {
+    delete s[`${name}KeyEnc`];
+    delete s[`${name}KeyPlain`];
+    return;
+  }
+  if (typeof key !== 'string' || !cleanKey(key)) return;
+  const clean = cleanKey(key);
+  if (!isValidKey(clean, KEY_MIN[name])) throw new Error(`${KEY_LABEL[name]} anahtarı geçersiz karakter içeriyor ya da çok kısa. Anahtarı yeniden kopyalayıp yapıştırın.`);
+  if (safeStorage.isEncryptionAvailable()) {
+    s[`${name}KeyEnc`] = safeStorage.encryptString(clean).toString('base64');
+    delete s[`${name}KeyPlain`];
+  } else {
+    s[`${name}KeyPlain`] = clean;
+    delete s[`${name}KeyEnc`];
+  }
 }
 
 function save(patch = {}) {
   const s = load();
-  const { geminiKey, clearGeminiKey, anthropicKey, clearAnthropicKey, ...rest } = patch || {};
+  const { anthropicKey, clearAnthropicKey, localApiKey, clearLocalKey, nimApiKey, clearNimKey, ...rest } = patch || {};
   for (const [k, v] of Object.entries(rest)) {
     if (!(k in DEFAULTS)) continue;
     const clean = sanitize(k, v);
     if (clean !== undefined) s[k] = clean;
   }
   // Varsayılan modelin kimliği açıkça yazıldıysa "varsayılan" olarak saklanır (varsayılan değişirse onu izler).
+  // Rol modelleri böyle sadeleştirilmez: "inceleyici her zaman Opus" seçimi, genel model o sırada Opus olsa da açık bir
+  // seçimdir; genel model sonradan değişince rol onu izlememeli.
   if (s.claudeModel === DEFAULT_CLAUDE_MODEL) s.claudeModel = '';
-  if (clearGeminiKey) {
-    delete s.geminiKeyEnc;
-    delete s.geminiKeyPlain;
-  } else if (typeof geminiKey === 'string' && cleanKey(geminiKey)) {
-    const key = cleanKey(geminiKey);
-    if (!isValidKey(key)) throw new Error('Gemini API anahtarı geçersiz karakter içeriyor. Anahtarı AI Studio\'dan tekrar kopyalayıp yapıştırın.');
-    if (safeStorage.isEncryptionAvailable()) {
-      s.geminiKeyEnc = safeStorage.encryptString(key).toString('base64');
-      delete s.geminiKeyPlain;
-    } else {
-      s.geminiKeyPlain = key;
-      delete s.geminiKeyEnc;
-    }
-  }
-  if (clearAnthropicKey) {
-    delete s.anthropicKeyEnc;
-    delete s.anthropicKeyPlain;
-  } else if (typeof anthropicKey === 'string' && cleanKey(anthropicKey)) {
-    const key = cleanKey(anthropicKey);
-    if (!isValidKey(key)) throw new Error('Anthropic API anahtarı geçersiz karakter içeriyor. Anahtarı console.anthropic.com\'dan tekrar kopyalayıp yapıştırın.');
-    if (safeStorage.isEncryptionAvailable()) {
-      s.anthropicKeyEnc = safeStorage.encryptString(key).toString('base64');
-      delete s.anthropicKeyPlain;
-    } else {
-      s.anthropicKeyPlain = key;
-      delete s.anthropicKeyEnc;
-    }
-  }
-  clampNumbers(s);
+  storeKey(s, 'anthropic', anthropicKey, clearAnthropicKey);
+  storeKey(s, 'local', localApiKey, clearLocalKey);
+  storeKey(s, 'nim', nimApiKey, clearNimKey);
+  normalize(s);
   if (typeof s.standards === 'string' && s.standards.trim() === DEFAULT_STANDARDS.trim()) s.standards = '';
   persist();
   return getPublic();
@@ -274,11 +317,76 @@ function clampInt(v, min, max, def) {
   return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : def;
 }
 
-// Yönetici (Gemini ya da Claude API) kullanıma hazır mı: seçili sağlayıcının anahtarı var mı.
-const managerReady = (s = get()) => (s.managerBy === 'anthropic' ? !!s.anthropicKey : !!s.geminiKey);
-const managerMissingMessage = (s = get()) => (s.managerBy === 'anthropic' ? 'Anthropic API anahtarı yok. Ayarlar\'dan ekleyin.' : 'Gemini API anahtarı yok. Ayarlar\'dan ekleyin.');
-// Günlük satırlarında sağlayıcı adını belirlemek için: anahtarı çözmeden yalnızca seçimi okur.
-const managerBy = () => (load().managerBy === 'anthropic' ? 'anthropic' : 'gemini');
+// Seçili yönetici: anahtarı çözmeden yalnızca seçimi okur (tanınmayan değer varsayılana düşer).
+const managerBy = (s = load()) => (ENUMS.managerBy.includes(s.managerBy) ? s.managerBy : DEFAULTS.managerBy);
+// Günlükte ve arayüzde görünen ad.
+const managerLabel = (s = load()) => ({ anthropic: 'Claude API', local: 'Yerel model', nim: 'NVIDIA NIM', opencode: 'OpenCode' }[managerBy(s)] || 'Claude CLI');
+// CLI yöneticileri (Claude CLI, OpenCode) anahtar değil kurulu bir CLI ister (tembel require: agents → runner → env zinciri).
+const cliReady = (id, s) => !!require('./agents').resolveBin(id, s);
+// Yönetici kullanıma hazır mı: Claude CLI → Claude Code kurulu; OpenCode → OpenCode kurulu; Claude API → anahtar;
+// yerel / NIM → model seçilmiş (NIM'de anahtar da).
+const managerReady = (s = get()) => {
+  const by = managerBy(s);
+  if (by === 'anthropic') return !!s.anthropicKey;
+  if (by === 'local') return !!String(s.localModel || '').trim();
+  if (by === 'nim') return !!s.nimApiKey && !!String(s.nimModel || '').trim();
+  if (by === 'opencode') return cliReady('opencode', s);
+  return cliReady('claude', s);
+};
+const managerMissingMessage = (s = get()) => {
+  const by = managerBy(s);
+  if (by === 'anthropic') return 'Anthropic API anahtarı yok. Ayarlar\'dan ekleyin.';
+  if (by === 'local') return 'Yerel model seçilmemiş. Ayarlar → Bağlantılar → Yerel model sunucusu\'ndan listeyi çekip Modeller → Yönetici\'den seçin.';
+  if (by === 'nim') return !s.nimApiKey ? 'NVIDIA NIM API anahtarı yok. Ayarlar → Bağlantılar → NVIDIA NIM\'den ekleyin (build.nvidia.com).' : 'NVIDIA NIM modeli seçilmemiş. Ayarlar → Bağlantılar → NVIDIA NIM\'den "Modelleri getir" ile seçin.';
+  if (by === 'opencode') return 'OpenCode bulunamadı. Kurulum: npm install -g opencode-ai (Ayarlar → Bağlantılar → OpenCode).';
+  return 'Claude Code bulunamadı. Ayarlar → Bağlantılar\'dan "Claude\'u kur ve bağla" ile bağlayın.';
+};
+// Claude CLI yöneticisinin modeli: ayarı boşsa Ajanlar'daki Claude modeli.
+const managerClaudeModelOf = (s = get()) => String(s.managerClaudeModel || '').trim() || claudeModelOf(s);
+
+// ---------- proje kadrosu ----------
+// Kadro: bir işte kimin ne yapacağı — yönetici (managerBy), kodlayıcı (agent), inceleyici (reviewerBy). Yeni iş ekranında
+// proje klasörü başına seçilir ve hatırlanır; Ayarlar → Modeller'deki seçimler yalnızca varsayılandır. İş kendi çözülmüş
+// kadrosunu taşır (job.stack): iş sürerken ya da sürdürülürken Ayarlar değişse de roller değişmez.
+// codexProvider: kodlayıcı Codex ise hangi modelle kodlar (openai | local: Ollama / LM Studio | nim); yerel modelle kodlama
+// böylece proje başına seçilir. Model adları (codexModel, nimCoderModel…) Ayarlar'dan gelir.
+const STACK_KEYS = { agent: ENUMS.defaultAgent, codexProvider: ENUMS.codexProvider, managerBy: ENUMS.managerBy, reviewerBy: ENUMS.reviewerBy };
+const MAX_PROJECT_STACKS = 60;
+const stackDirKey = (dir) => {
+  const p = path.resolve(String(dir || ''));
+  return process.platform === 'win32' ? p.toLowerCase() : p;
+};
+
+// Yalnızca tanınan alanlar ve geçerli değerler kalır (arayüzden ya da eski kayıttan gelen başka bir şey yok sayılır).
+function cleanStack(stack) {
+  const out = {};
+  for (const [k, allowed] of Object.entries(STACK_KEYS)) {
+    const v = stack?.[k];
+    if (typeof v === 'string' && allowed.includes(v)) out[k] = v;
+  }
+  return out;
+}
+
+// Ayarların kadroyla ezilmiş hali: yönetici / kodlayıcı / inceleyici seçimleri kadrodan, gerisi ayarlardan.
+function withStack(s, stack) {
+  const { agent, ...rest } = cleanStack(stack);
+  return { ...s, ...(agent ? { defaultAgent: agent } : {}), ...rest };
+}
+
+// Ayarlardan çözülmüş tam kadro (iş kaydına yazılır).
+const resolveStack = (s) => ({ agent: s.defaultAgent, codexProvider: ENUMS.codexProvider.includes(s.codexProvider) ? s.codexProvider : 'openai', managerBy: managerBy(s), reviewerBy: s.reviewerBy === 'agent' ? 'agent' : 'auto' });
+
+// Bu klasör için hatırlanan kadro (yoksa boş nesne: Ayarlar'daki varsayılanlar geçerli).
+const projectStack = (dir) => (dir ? cleanStack(load().projectStacks?.[stackDirKey(dir)]) : {});
+
+function rememberProjectStack(dir, stack) {
+  if (!dir) return;
+  const s = load();
+  const all = { ...(s.projectStacks || {}), [stackDirKey(dir)]: { ...cleanStack(stack), at: Date.now() } };
+  // En son kullanılan projeler kalır; dosya sınırsız büyümez.
+  s.projectStacks = Object.fromEntries(Object.entries(all).sort((a, b) => (b[1].at || 0) - (a[1].at || 0)).slice(0, MAX_PROJECT_STACKS));
+  persist();
+}
 
 /**
  * Şifreleme yokken düz saklanmış API anahtarlarını şifreler. Uygulama hazır olduktan sonra çağrılır (Windows ve Linux'ta
@@ -288,7 +396,7 @@ function migratePlain() {
   const s = load();
   if (!safeStorage.isEncryptionAvailable()) return 0;
   let n = 0;
-  for (const name of ['gemini', 'anthropic']) {
+  for (const name of ['anthropic', 'local', 'nim']) {
     const plain = cleanKey(s[`${name}KeyPlain`] || '');
     if (!plain || s[`${name}KeyEnc`]) continue;
     s[`${name}KeyEnc`] = safeStorage.encryptString(plain).toString('base64');
@@ -299,4 +407,4 @@ function migratePlain() {
   return n;
 }
 
-module.exports = { get, getPublic, save, migratePlain, managerReady, managerMissingMessage, managerBy };
+module.exports = { get, peek, getPublic, save, migratePlain, managerReady, managerMissingMessage, managerBy, managerLabel, managerClaudeModelOf, cleanStack, withStack, resolveStack, projectStack, rememberProjectStack };

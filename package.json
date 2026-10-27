@@ -33,6 +33,7 @@
     "productName": "Sonda Agent",
     "files": [
       "src/**/*",
+      "!src/renderer/__smoke.html",
       "package.json"
     ],
     "mac": {

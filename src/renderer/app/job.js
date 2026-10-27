@@ -1,5 +1,5 @@
 // İş görünümü: başlık, istatistikler, plan içeriği, görevler, plan eylemleri, rapor ve belgeler.
-import { api, $, $$, esc, md, firstLine, stIcon, PHASES, ACTIVE, TASK_STATUS, KIND_LABEL, FINDING_LABEL, SEV_LABEL, managerOf, state, toast, attempt, baseName, ico, fmtDur, busyHere, isLiveJob } from './core.js';
+import { api, $, $$, esc, md, firstLine, stIcon, PHASES, ACTIVE, TASK_STATUS, KIND_LABEL, FINDING_LABEL, SEV_LABEL, stackLabel, stackText, managerOf, state, toast, attempt, baseName, ico, fmtDur, busyHere, isLiveJob } from './core.js';
 import { renderEnvBadge } from './history.js';
 import { connectAgent } from './agents.js';
 import { emptyHtml, KLOADER } from './theme.js';
@@ -69,11 +69,13 @@ function renderStats() {
   $('#jobSubMeta').innerHTML = metaParts.join('');
   const rows = [];
   if (tasks.length) rows.push(['Görev', `${done}/${tasks.length}`]);
+  if (job.stack) rows.push(['Kadro', esc(stackText(job.stack))]);
   if (job.agent === 'claude' && state.settings?.claudeModelLabel) rows.push(['Claude modeli', esc(state.settings.claudeModelLabel)]);
   if (st.agentRuns) rows.push(['Ajan oturumu', `${st.agentRuns}×`]);
   if (st.costUsd) rows.push(['API karşılığı*', `≈$${st.costUsd.toFixed(2)}`]);
-  if (st.geminiTokens) rows.push(['Gemini', `${Math.round(st.geminiTokens / 1000)}K token`]);
-  if (st.managerTokens) rows.push(['Claude API', `${Math.round(st.managerTokens / 1000)}K token`]);
+  const mgrTokens = (st.managerTokens || 0) + (st.geminiTokens || 0); // eski işler: geminiTokens
+  // Yönetici sayacı işin kendi kadrosuyla etiketlenir (Ayarlar sonradan değişmiş olabilir).
+  if (mgrTokens) rows.push([job.stack ? `Yönetici · ${esc(stackLabel('managerBy', job.stack.managerBy))}` : state.settings?.managerLabel || 'Yönetici', `${Math.round(mgrTokens / 1000)}K token`]);
   if (dur) rows.push(['Süre', dur]);
   $('#jobStats').innerHTML = rows.length ? rows.map(([k, v]) => `<span>${k}</span><b>${v}</b>`).join('') : '<span>Henüz istatistik yok</span>';
   $('#jobStats').title = st.costUsd ? '* Claude aboneliğinle çalışıyorsan ücret yok; bu, aynı işin API fiyatlarıyla tahmini karşılığıdır.' : '';
@@ -569,7 +571,7 @@ function renderPlanActions() {
       state.actionsKey = '';
       await attempt(() => api.resume(state.job.id));
     };
-    if (kept) $('#freshPlanBtn').onclick = () => submitPlan({ idea: job.idea, projectDir: job.projectDir, agent: job.agent, attachments: (job.attachments || []).map((a) => ({ ...a, supported: true })) });
+    if (kept) $('#freshPlanBtn').onclick = () => submitPlan({ idea: job.idea, projectDir: job.projectDir, agent: job.agent, stack: job.stack, attachments: (job.attachments || []).map((a) => ({ ...a, supported: true })) });
   } else if (mode === 'resume') {
     el.innerHTML = `<div class="note-box">
         <div class="sec-title">Kaldığı yerden devam et</div>

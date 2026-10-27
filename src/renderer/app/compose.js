@@ -1,5 +1,5 @@
 // Yeni iş ekranı: klasör, ajan, ekler (doküman / tasarım), hazırlık durumu, plan başlatma.
-import { api, $, $$, esc, managerOf, state, toast, attempt, baseName, ico, semverOf, fmtSize, dirBusy } from './core.js';
+import { api, $, $$, esc, STACK_OPTIONS, coderKey, coderOf, managerOf, state, toast, attempt, baseName, ico, semverOf, fmtSize, dirBusy } from './core.js';
 import { show, refreshHistorySoon, openJob } from './history.js';
 import { refreshAgents, renderAgentStatus, needsConnection, connectionHtml, onConnClick, connectAgent } from './agents.js';
 import { renderJob } from './job.js';
@@ -9,13 +9,57 @@ import { renderMaint } from './maintenance.js';
 import { openEnv } from './env.js';
 import { updateAgent, openSettings } from './settings.js';
 
-// ---------- yeni iş ekranı ----------
-function setAgent(id) {
-  state.compose.agent = id;
-  $$('#agentSeg button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.agent === id)));
+// ---------- yeni iş ekranı: kadro ----------
+// Kadro bu işte kimin ne yapacağıdır: yönetici (managerBy), kodlayıcı (agent + Codex sağlayıcısı codexProvider), inceleyici
+// (reviewerBy). Proje klasörü başına hatırlanır (ana süreç, settings.projectStack); Ayarlar → Modeller'deki seçimler
+// yalnızca varsayılandır. `state.compose.agent` kadrodaki kodlayıcıyla her zaman aynıdır (kenar çubuğu ve hazırlık kartı onu okur).
+const stackSelects = () => $$('#stackBar select[data-stack]');
+// Seçici değeri ↔ kadro alanları: kodlayıcı seçicisi "codex:local" gibi birleşik değer taşır (bkz. core.coderKey).
+const selValue = (sel, stack) => (sel.dataset.stack === 'coder' ? coderKey(stack) : stack[sel.dataset.stack]);
+const selPatch = (sel) => (sel.dataset.stack === 'coder' ? coderOf(sel.value) : { [sel.dataset.stack]: sel.value });
+for (const sel of stackSelects()) {
+  sel.innerHTML = STACK_OPTIONS[sel.dataset.stack].map(([v, label]) => `<option value="${esc(v)}">${esc(label)}</option>`).join('');
+  sel.addEventListener('change', () => setStack(selPatch(sel)));
+}
+
+// Ayarlardaki varsayılan kadro.
+const defaultStack = (s = state.settings) => ({ managerBy: s?.managerBy || 'claudecli', agent: s?.defaultAgent || 'claude', codexProvider: s?.codexProvider || 'openai', reviewerBy: s?.reviewerBy || 'auto' });
+
+function setStack(patch) {
+  state.compose.stack = { ...defaultStack(), ...(state.compose.stack || {}), ...patch };
+  state.compose.agent = state.compose.stack.agent;
+  for (const sel of stackSelects()) sel.value = selValue(sel, state.compose.stack);
+  renderStackNote();
   renderAgentStatus();
   renderReadiness();
 }
+// Eski ad (başlangıç ve dış çağrılar): yalnızca kodlayıcıyı değiştirir.
+const setAgent = (id) => setStack({ agent: id });
+
+// Seçili klasör için hatırlanan kadro yüklenir; klasör yoksa ya da kaydı yoksa Ayarlar'daki varsayılanlar.
+async function loadStackFor(dir) {
+  const saved = dir ? await api.projectStack(dir).catch(() => null) : null;
+  state.compose.stackSaved = !!(saved && Object.keys(saved).length);
+  setStack({ ...defaultStack(), ...(saved || {}) });
+}
+
+// Kadro ayarlardan mı, bu klasörün kaydından mı; Claude'un bu kadrodaki yeri (hiç kullanılmıyor / yalnızca yönetici / çapraz inceleme).
+function renderStackNote() {
+  const st = state.compose.stack || defaultStack();
+  const d = defaultStack();
+  const same = ['managerBy', 'agent', 'codexProvider', 'reviewerBy'].every((k) => st[k] === d[k]);
+  const parts = [state.compose.stackSaved ? 'Bu klasör için hatırlanan kadro.' : same ? 'Ayarlar → Modeller\'deki varsayılanlar.' : 'Bu projeye özel kadro; Planla deyince bu klasör için hatırlanır.'];
+  if (st.reviewerBy === 'agent' && st.agent !== 'claude') parts.push(st.managerBy === 'claudecli' ? 'Claude Code yalnızca yönetici olarak kullanılır.' : 'Claude Code hiç kullanılmaz.');
+  else if (st.agent !== 'claude') parts.push('Çapraz inceleme: kodu başka bir model yazar, Claude Code inceler.');
+  if (st.agent === 'codex' && st.codexProvider === 'local') parts.push(state.settings?.codexModel ? `Yerel model: ${state.settings.codexModel} (Ayarlar → Modeller → Kodlayıcı).` : 'Yerel model adı boş: Ayarlar → Modeller → Kodlayıcı → Codex — yerel model alanına Ollama\'daki adı yaz.');
+  $('#stackNote').textContent = parts.join(' ');
+}
+
+// Kadro seçimleriyle ezilmiş ayarlar (hazırlık kartı ve Planla düğmesi bunu okur).
+const composeSettings = () => {
+  const st = state.compose.stack || defaultStack();
+  return state.settings ? { ...state.settings, managerBy: st.managerBy, defaultAgent: st.agent, codexProvider: st.codexProvider, reviewerBy: st.reviewerBy } : state.settings;
+};
 
 function renderFolder() {
   const d = state.compose.projectDir;
@@ -67,17 +111,24 @@ function addAttachments(list, target = state.compose.attachments) {
 function renderReadiness() {
   const el = $('#readiness');
   const items = [];
-  const mgr = managerOf(state.settings);
-  if (state.settings && !mgr.has) {
-    items.push(`<div class="ready-item warn">${ico('key')}<span>${mgr.invalid ? `Kayıtlı ${mgr.name} anahtarı okunamadı; yeniden girin.` : `${mgr.name} API anahtarı eklenmemiş.`}</span><button class="btn sm" data-act="settings">Ayarları aç</button></div>`);
+  const cs = composeSettings();
+  const mgr = managerOf(cs);
+  // Claude CLI yöneticisinde eksik olan anahtar değil Claude Code'dur: aşağıdaki bağlantı kartı onu zaten gösterir.
+  if (cs && !mgr.has && !mgr.cli) {
+    const why = mgr.local ? 'Yerel model seçilmemiş (Ayarlar → Modeller → Yönetici).' : mgr.nim ? 'NVIDIA NIM anahtarı ya da modeli eksik (Ayarlar → Bağlantılar → NVIDIA NIM, model: Modeller).' : mgr.opencode ? 'Yönetici OpenCode ama OpenCode kurulu değil: npm install -g opencode-ai (Ayarlar → Bağlantılar → OpenCode).' : mgr.invalid ? `Kayıtlı ${mgr.name} anahtarı okunamadı; yeniden girin.` : `${mgr.name} API anahtarı eklenmemiş.`;
+    items.push(`<div class="ready-item warn">${ico('key')}<span>${why}</span><button class="btn sm" data-act="settings">Ayarları aç</button></div>`);
   }
   const ag = state.agents?.[state.compose.agent];
   // Claude her işte gerekir (planlama ve incelemeler); Codex yalnızca kodlayan ajan olarak seçildiyse.
   const claude = state.agents?.claude;
-  if (claude && needsConnection(claude)) items.push(`<div class="ready-conn">${connectionHtml(claude, { compact: true })}</div>`);
+  // Claude'suz çalışmada (inceleme kodlayan ajanda) Claude bağlantı kartı yalnızca Claude kodlayıcı seçiliyse gerekir;
+  // yönetici Claude CLI ise Claude Code her durumda gerekir (aksi halde Planla düğmesi nedensiz kilitli görünürdü).
+  const claudeNeeded = cs?.reviewerBy !== 'agent' || state.compose.agent === 'claude' || !!mgr.cli;
+  if (claude && claudeNeeded && needsConnection(claude)) items.push(`<div class="ready-conn">${connectionHtml(claude, { compact: true })}</div>`);
   if (ag && ag.id !== 'claude' && !ag.found) {
     items.push(`<div class="ready-item warn">${ico('terminal')}<span>${esc(ag.label)} bulunamadı. Kurulum: <code>${esc(ag.install)}</code></span><button class="btn sm" data-act="redetect">Tekrar kontrol et</button></div>`);
-  } else if (ag && ag.id !== 'claude' && ag.loggedIn === false) {
+  } else if (ag && ag.id !== 'claude' && ag.loggedIn === false && !(ag.id === 'codex' && cs?.codexProvider !== 'openai')) {
+    // Codex yerel modelle ya da NIM ile kodlarken OpenAI girişi gerekmez (algılama Ayarlar'daki sağlayıcıya bakar; kadro farklı olabilir).
     items.push(`<div class="ready-item warn">${ico('lock')}<span>${esc(ag.label)} oturumu açık değil.</span><button class="btn sm" data-act="login">Giriş yap</button><button class="btn sm ghost" data-act="redetect">Tekrar kontrol et</button></div>`);
   }
   if (ag?.found && ag.updateAvailable && !state.dismissedUpdate) {
@@ -102,7 +153,7 @@ function renderReadiness() {
   el.hidden = !items.length;
   // Giriş durumu yalnızca uyarıdır: bazı ortamlarda CLI yanlış "giriş yok" diyebilir;
   // gerçek bir giriş sorunu iş başında net bir hata olarak zaten görünür.
-  $('#planBtn').disabled = full || here || !managerOf(state.settings).has || (ag && !ag.found) || (claude && !claude.found);
+  $('#planBtn').disabled = full || here || !mgr.has || (ag && !ag.found) || (claude && claudeNeeded && !claude.found);
 }
 
 $('#readiness').addEventListener('click', async (e) => {
@@ -132,15 +183,12 @@ $('#readiness').addEventListener('click', async (e) => {
   }
 });
 
-$('#agentSeg').addEventListener('click', (e) => {
-  const b = e.target.closest('button[data-agent]');
-  if (b) setAgent(b.dataset.agent);
-});
 $('#folderBtn').addEventListener('click', async () => {
   const dir = await attempt(() => api.pickFolder());
   if (dir) {
     state.compose.projectDir = dir;
     renderFolder();
+    await loadStackFor(dir);
   }
 });
 $('#attachBtn').addEventListener('click', async () => addAttachments(await attempt(() => api.pickDocs())));
@@ -187,7 +235,7 @@ composer.addEventListener('drop', async (e) => {
 document.addEventListener('dragover', (e) => e.preventDefault());
 document.addEventListener('drop', (e) => e.preventDefault());
 
-async function submitPlan({ idea, projectDir, agent, attachments }) {
+async function submitPlan({ idea, projectDir, agent, stack, attachments }) {
   const usable = (attachments || []).filter((a) => a.supported).map((a) => ({ ...a, role: isDesignAtt(a) ? 'design' : 'doc' }));
   if (!projectDir) {
     toast('Önce proje klasörünü seçin.', true);
@@ -197,8 +245,9 @@ async function submitPlan({ idea, projectDir, agent, attachments }) {
     toast('Bir istek yazın veya doküman ekleyin.', true);
     return false;
   }
-  const id = await attempt(() => api.plan({ idea, projectDir, agent, attachments: usable }));
+  const id = await attempt(() => api.plan({ idea, projectDir, agent, stack, attachments: usable }));
   if (!id) return false;
+  state.compose.stackSaved = true;
   followNewJob(id);
   return true;
 }
@@ -242,7 +291,7 @@ function followNewJob(id) {
 }
 
 $('#planBtn').addEventListener('click', async () => {
-  const ok = await submitPlan({ idea: $('#idea').value, projectDir: state.compose.projectDir, agent: state.compose.agent, attachments: state.compose.attachments });
+  const ok = await submitPlan({ idea: $('#idea').value, projectDir: state.compose.projectDir, agent: state.compose.agent, stack: state.compose.stack, attachments: state.compose.attachments });
   if (ok) {
     $('#idea').value = '';
     state.compose.attachments = [];
@@ -258,4 +307,4 @@ $('#newJobBtn').addEventListener('click', () => {
   $('#idea').focus();
 });
 
-export { setAgent, renderFolder, refreshComposeEnv, isDesignAtt, attChip, renderAttachments, addAttachments, renderReadiness, submitPlan, followNewJob };
+export { setAgent, setStack, loadStackFor, renderFolder, refreshComposeEnv, isDesignAtt, attChip, renderAttachments, addAttachments, renderReadiness, submitPlan, followNewJob };

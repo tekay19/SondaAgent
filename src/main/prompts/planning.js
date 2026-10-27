@@ -187,7 +187,7 @@ STEP 4 of 4 — PLAN REVIEW. A draft task plan is given, plus the list of requir
 - check that every Must/Should feature, screen and journey of the product definition is really built by some task;
 - keep phase names exactly as in the request; keep what is already good and do not drop detail.`;
 
-// npm kayıt defterinden alınan güncel sürümler (Gemini'nin eski API bilgisini düzeltmek için).
+// npm kayıt defterinden alınan güncel sürümler (modelin eski API bilgisini düzeltmek için).
 function versionsBlock(versions) {
   const entries = Object.entries(versions || {});
   if (!entries.length) return '';
@@ -240,10 +240,10 @@ function specRewriteUserText({ base, head, sectionText, critique, decisions }) {
   return `${specUserText(base, head)}\n\n# Corrections decided in plan review (binding)\n${decisions || '(none)'}\n\n# Independent critique findings\n${crit || '(none)'}\n\n# Current section text\n${sectionText}`;
 }
 
-// ---------- Claude mühendis planlar, Gemini yönetici onaylar ----------
-// Gemini ürünü ve "bitti"nin tanımını (gereksinimler) belirler; teknik şartnameyi ve görev planını
+// ---------- Claude mühendis planlar, yönetici onaylar ----------
+// Yönetici ürünü ve "bitti"nin tanımını (gereksinimler) belirler; teknik şartnameyi ve görev planını
 // araçlarla çalışan Claude yazar (klasörü inceler, güncel sürümleri ve komutları doğrular).
-// Gemini planı kullanıcının isteğine göre denetler ve gerekirse değişiklik ister.
+// Yönetici planı kullanıcının isteğine göre denetler ve gerekirse değişiklik ister.
 const CLAUDE_PLAN_SCHEMA = {
   type: 'object',
   properties: {
@@ -428,7 +428,7 @@ const PLAN_CRITIQUE_SCHEMA = {
 };
 
 function planCritiquePrompt({ lang, base, head, spec, draft }) {
-  return `You are an independent principal engineer. Another engineer (Gemini) wrote the plan below; autonomous coding agents will execute it task by task with no human in the loop, so every flaw becomes a bug. Critique it hard but fairly BEFORE any code is written.
+  return `You are an independent principal engineer. Another engineer (the product-manager model) wrote the plan below; autonomous coding agents will execute it task by task with no human in the loop, so every flaw becomes a bug. Critique it hard but fairly BEFORE any code is written.
 
 You are working in the target project folder in READ-ONLY mode. Use your tools:
 - inspect the existing files ON DISK (if any) — the plan must fit what is already there. Judge only the current working tree: ignore git history and files that were deleted from disk (do not use \`git show HEAD:...\` to reconstruct removed code);

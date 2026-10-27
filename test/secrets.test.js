@@ -236,17 +236,17 @@ test('Anahtar deposu: bozuk dosya kenara alınır, üzerine yazılıp diğer pro
 test('Ayarlar: bozuk settings.json kenara alınır', () => {
   const file = path.join(userData, 'settings.json');
   fs.writeFileSync(file, '{"managerBy": "anthropic",');
-  settings.save({ managerBy: 'gemini' });
+  settings.save({ managerBy: 'local' });
   assert.ok(fs.readdirSync(userData).some((f) => f.startsWith('settings.json.bozuk-')));
-  assert.strictEqual(JSON.parse(fs.readFileSync(file, 'utf8')).managerBy, 'gemini');
+  assert.strictEqual(JSON.parse(fs.readFileSync(file, 'utf8')).managerBy, 'local');
 });
 
 test('Şifreleme sonradan kullanılabilir olursa düz saklanan anahtarlar şifrelenir', () => {
-  const GKEY = ['AIza', 'gemini', 'test', 'abcdefghijklmnop'].join('');
+  const GKEY = ['lm', 'studio', 'test', 'abcdefghijklmnop'].join('-'); // yerel sunucunun isteğe bağlı anahtarı
   const dir = tmp();
   encryption = false;
   try {
-    settings.save({ geminiKey: GKEY });
+    settings.save({ localApiKey: GKEY });
     secrets.update(dir, { set: { STRIPE_SECRET_KEY: LIVE } });
     assert.ok(fs.readFileSync(path.join(userData, 'settings.json'), 'utf8').includes(GKEY));
     assert.ok(fs.readFileSync(path.join(userData, 'secrets.json'), 'utf8').includes(LIVE));
@@ -255,7 +255,7 @@ test('Şifreleme sonradan kullanılabilir olursa düz saklanan anahtarlar şifre
     secrets.migratePlain();
     assert.ok(!fs.readFileSync(path.join(userData, 'settings.json'), 'utf8').includes(GKEY));
     assert.ok(!fs.readFileSync(path.join(userData, 'secrets.json'), 'utf8').includes(LIVE));
-    assert.strictEqual(settings.get().geminiKey, GKEY);
+    assert.strictEqual(settings.get().localApiKey, GKEY);
     assert.strictEqual(secrets.get(dir).STRIPE_SECRET_KEY, LIVE);
   } finally {
     encryption = false;

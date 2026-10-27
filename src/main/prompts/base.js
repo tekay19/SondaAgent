@@ -54,7 +54,7 @@ function checkState(c) {
   return c.expectFail && c.code === 0 ? 'FAILED (it must exit non-zero, but it succeeded)' : `FAILED (exit ${c.code})`;
 }
 
-// Gemini şemasını (BÜYÜK harfli türler, propertyOrdering) ajanların JSON şemasına çevirir.
+// Eski biçimli şemayı (BÜYÜK harfli türler, propertyOrdering) standart JSON şemasına çevirir.
 function toJsonSchema(node) {
   if (Array.isArray(node)) return node.map(toJsonSchema);
   if (!node || typeof node !== 'object') return node;

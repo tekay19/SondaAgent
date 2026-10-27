@@ -13,10 +13,30 @@ const claudeModelOf = (settings) => String(settings?.claudeModel || '').trim() |
 
 // Teknik brifleri yazan model. Brif, görevden önce kodu gezerek yazılır; kullanıcı tercihi: Claude Fable 5.1.
 const BRIEF_MODEL = 'claude-fable-5-1';
-// briefBy: "fable" → Fable 5.1 · "coder" → kodlama modeli (Ayarlar'daki Claude modeli) · "gemini" → Gemini yazar (null).
-const briefModelOf = (settings) => (settings?.briefBy === 'gemini' ? null : settings?.briefBy === 'coder' ? claudeModelOf(settings) : BRIEF_MODEL);
+// briefModel ayarı doluysa o; yoksa briefBy: "fable" → Fable 5.1, "coder" → kodlama modeli. Claude kurulu değilse brifi
+// yönetici yazar (bkz. orchestrator/task.js).
+const briefModelOf = (settings) => String(settings?.briefModel || '').trim() || (settings?.briefBy === 'coder' ? claudeModelOf(settings) : BRIEF_MODEL);
+
+// Rol başına Claude modeli: planlayıcı (şartname + görev planı + plan eleştirisi), kodlayıcı (görev, düzeltme, TDD),
+// inceleyici (ilk inceleme, derin inceleme, uzmanlar, doğrulama, hafıza, denetim), brif. Rolün ayarı boşsa genel model.
+const ROLES = ['planner', 'coder', 'reviewer', 'brief'];
+const roleModelOf = (settings, role) => {
+  if (role === 'brief') return briefModelOf(settings);
+  const own = ROLES.includes(role) ? String(settings?.[`${role}Model`] || '').trim() : '';
+  return own || claudeModelOf(settings);
+};
 
 // Kullanıcıya gösterilecek ad: "Opus 5.5"; katalogda yoksa kimliğin kendisi.
 const claudeModelLabel = (id) => CLAUDE_MODELS.find((m) => m.id === id)?.label || String(id || '');
 
-module.exports = { DEFAULT_CLAUDE_MODEL, CLAUDE_MODELS, BRIEF_MODEL, claudeModelOf, claudeModelLabel, briefModelOf };
+// Codex'in bu rolde kullanacağı model. NIM sağlayıcısında rol başına NIM modeli (brif inceleyici modelini alır), boşsa
+// yöneticinin NIM modeli; Codex model alanı (OpenAI / yerel model adı) NIM'de HİÇ kullanılmaz: sağlayıcı değiştirilince
+// orada kalan eski ad NIM'e gönderilmesin. Diğer sağlayıcılarda Codex model alanı (boş = Codex varsayılanı).
+const NIM_ROLE_KEY = { planner: 'nimPlannerModel', coder: 'nimCoderModel', reviewer: 'nimReviewerModel', brief: 'nimReviewerModel' };
+const codexModelFor = (settings, role) => {
+  if (settings?.codexProvider !== 'nim') return String(settings?.codexModel || '').trim();
+  const key = NIM_ROLE_KEY[role];
+  return String((key && settings?.[key]) || '').trim() || String(settings?.nimModel || '').trim();
+};
+
+module.exports = { DEFAULT_CLAUDE_MODEL, CLAUDE_MODELS, BRIEF_MODEL, ROLES, claudeModelOf, claudeModelLabel, briefModelOf, roleModelOf, codexModelFor };

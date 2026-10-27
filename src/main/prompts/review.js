@@ -1,4 +1,4 @@
-// İnceleme istemleri: ilk inceleme (Gemini ya da ajan), derin inceleme, faz kapısı, son kabul, güvenlik denetimi.
+// İnceleme istemleri: ilk inceleme (yönetici ya da ajan), derin inceleme, faz kapısı, son kabul, güvenlik denetimi.
 const { REVIEWER_RULES, REVIEW_COMMANDS, checkState, toJsonSchema, installedText } = require('./base');
 const { maintenanceReviewText, envReviewText, designReviewText, designPreviewParts, requirementsFor, reqStatusText, smokeProblemsText, calibrationText, lessonsText, openFindingsText, openIssuesText } = require('./context');
 
@@ -131,7 +131,7 @@ const CHECK_ITEM = (key) => ({
   required: [key, 'status', 'evidence'],
 });
 
-// Yönetici (Gemini) incelemesi. Alan sırası bilinçlidir: model önce değişikliği KIRMAYI dener (riskAnalysis),
+// Yönetici incelemesi. Alan sırası bilinçlidir: model önce değişikliği KIRMAYI dener (riskAnalysis),
 // kriterleri ve gereksinimleri kanıtla işaretler, kusurları bulgu olarak yazar; puan ve karar EN SONDA gelir.
 // (Karar ilk alan olduğunda model analiz etmeden "onay" yazıyor ve her şeye 10/10 veriyordu.)
 const RISK_ITEM = {
@@ -189,7 +189,7 @@ const REVIEW_SCHEMA = {
   propertyOrdering: ['riskAnalysis', 'acceptanceChecks', 'requirementChecks', 'testQuality', 'findings', 'issues', 'suggestions', 'scores', 'qualityScore', 'verdict', 'summary', 'fixInstructions'],
 };
 
-// İnceleme yöntemi (Gemini'nin yönetici incelemesi ve ajanın ilk incelemesi aynı yöntemi izler):
+// İnceleme yöntemi (yöneticinin incelemesi ve ajanın ilk incelemesi aynı yöntemi izler):
 // önce değişikliği kırmayı dene → kanıtla işaretle → bulguları yaz → puan ve karar en sonda.
 function reviewMethod(lang) {
   return `Work in this order — the output fields are ordered the same way, fill them in sequence:
@@ -238,7 +238,7 @@ const AGENT_REVIEW_SCHEMA = (() => {
 })();
 
 /**
- * Görevin ilk incelemesi, kodu GEZEN ve testleri çalıştıran bağımsız bir ajan tarafından yapılır (Gemini "yönetici"
+ * Görevin ilk incelemesi, kodu GEZEN ve testleri çalıştıran bağımsız bir ajan tarafından yapılır (yönetici rolü "manager"
  * rolündeyken). Yöntem yönetici incelemesiyle aynıdır: önce kırmayı dene, kanıtla işaretle, bulguları yaz, karar en sonda.
  */
 function taskReviewPrompt({ job, task, agentSummary, checks, changed, diffStat, tddNote, installed, lang }) {

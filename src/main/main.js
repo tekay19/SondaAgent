@@ -7,8 +7,10 @@ const { spawn } = require('child_process');
 const { fixPath, findExecutable, agentEnv } = require('./env');
 const runner = require('./runner');
 const settings = require('./settings');
-const gemini = require('./gemini');
 const anthropic = require('./anthropic');
+const claudecli = require('./claudecli');
+const localllm = require('./localllm');
+const { claudeModelLabel, claudeModelOf, codexModelFor } = require('./models');
 const agents = require('./agents');
 const docs = require('./docs');
 const jobs = require('./jobs');
@@ -19,29 +21,11 @@ const archive = require('./archive');
 const { Orchestrator } = require('./orchestrator');
 const { jobEventThrottle, folderGuard } = require('./ipcutil');
 
-// Uygulama adı: ayarlar klasörü (~/Library/Application Support/Sonda Agent) ve şifreli anahtarın
-// anahtar zinciri kaydı bu ada bağlıdır. İlk sürümün ("Orkestra") verileri bir kez taşınır;
-// eski şifreli anahtar yeni adla çözülemeyeceği için Gemini anahtarı yeniden istenir.
+// Uygulama adı: ayarlar klasörü (~/Library/Application Support/Sonda Agent) ve şifreli anahtarların
+// anahtar zinciri kaydı bu ada bağlıdır.
 app.setName('Sonda Agent');
-
-// Not: taşıma tek kopya kilidinden ÖNCE yapılır — kilit dosyası kullanıcı veri klasörünü oluşturur ve sonra
-// "klasör yok" koşulu hiç sağlanmazdı.
-(() => {
-  const current = app.getPath('userData');
-  const legacy = path.join(app.getPath('appData'), 'Orkestra');
-  if (!fs.existsSync(current) && fs.existsSync(legacy)) {
-    try {
-      fs.cpSync(legacy, current, { recursive: true });
-      // Eski adla şifrelenmiş anahtar yeni adla çözülemez; taşıma.
-      const file = path.join(current, 'settings.json');
-      const data = JSON.parse(fs.readFileSync(file, 'utf8'));
-      delete data.geminiKeyEnc;
-      fs.writeFileSync(file, JSON.stringify(data, null, 2));
-    } catch {
-      /* taşınamazsa temiz başla */
-    }
-  }
-})();
+// Geliştirme / test: ayrı bir veri klasörüyle ikinci bir kopya çalıştırmak için (tek kopya kilidi userData'ya bağlıdır).
+if (process.env.SONDA_USER_DATA) app.setPath('userData', process.env.SONDA_USER_DATA);
 
 // Tek kopya: ikinci bir Sonda aynı işi "yarıda kalmış" görüp sürdürebilir (aynı klasörde iki ajan) ve
 // ayar / anahtar dosyalarını ezebilirdi. İkinci açılış var olan pencereyi öne getirir.
@@ -51,7 +35,7 @@ else fixPath();
 
 const ACTIVE_PHASES = new Set(['planning', 'running', 'verifying', 'testing', 'reviewing', 'fixing', 'reporting']);
 const NOTIFY = {
-  awaiting_answers: ['Birkaç sorum var', 'Gemini ürün tanımını çıkardı; planı netleştirmek için cevaplarınızı bekliyor.'],
+  awaiting_answers: ['Birkaç sorum var', 'Yönetici ürün tanımını çıkardı; planı netleştirmek için cevaplarınızı bekliyor.'],
   awaiting_approval: ['Plan hazır', 'Plan hazırlandı; onayınızı bekliyor.'],
   done: ['Teslime hazır', 'Testler, güvenlik ve son kabul geçti; rapor hazır.'],
   incomplete: ['Teslime hazır değil', 'Son kabulde açık sorunlar kaldı; düzeltmeye devam edebilirsiniz.'],
@@ -305,6 +289,8 @@ const agentOf = (id) => {
 };
 
 handle('settings:get', () => settings.getPublic());
+// Seçili proje klasörü için hatırlanan kadro (yönetici / kodlayıcı / inceleyici); yoksa boş nesne.
+handle('settings:projectStack', (dir) => settings.projectStack(needDir(dir)));
 handle('settings:save', (patch) => {
   const s = settings.save(patch);
   applyTheme();
@@ -338,24 +324,77 @@ handle('env:save', ({ dir: raw, set, remove } = {}) => {
 // Yapıştırılan .env metnini dotenv kurallarıyla çözer (tırnaklar, çok satırlı değerler, satır sonu yorumları).
 handle('env:parse', (text) => envfile.parseEnv(String(text || '').slice(0, 200000)));
 
-handle('gemini:models', () => gemini.listModels({ apiKey: settings.get().geminiKey }));
-handle('anthropic:models', () => anthropic.listModels({ apiKey: settings.get().anthropicKey }));
-handle('anthropic:test', async () => {
+// Sunucu listeleme ve deneme çağrıları Ayarlar penceresindeki HENÜZ KAYDEDİLMEMİŞ değerlerle çalışır (adres, anahtar,
+// model): kullanıcı "Vazgeç" derse hiçbir şey kalıcı olmaz. Verilmeyen alan kayıtlı ayardan tamamlanır.
+const str = (v) => String(v || '').trim();
+const serverArgs = (prefix, o = {}) => {
   const s = settings.get();
-  const text = await anthropic.generate({ apiKey: s.anthropicKey, model: s.anthropicModel, parts: [{ text: 'Reply with exactly: OK' }], maxOutputTokens: 256, effort: 'low' });
-  // Yönetici adımlarının çoğu şemalı (JSON) çağrıdır: test o yolu da dener, yoksa ilk planlamada patlar.
-  const json = await anthropic.generate({ apiKey: s.anthropicKey, model: s.anthropicModel, parts: [{ text: 'Return ok=true.' }], schema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'] }, maxOutputTokens: 256, effort: 'low' });
-  if (json?.ok !== true) throw new Error(`Claude API şemalı yanıtı beklenen gibi değil: ${JSON.stringify(json).slice(0, 120)}`);
-  return { model: s.anthropicModel, reply: `${text.trim().slice(0, 40)} · JSON ✓` };
+  return { baseUrl: str(o.baseUrl) || s[`${prefix}BaseUrl`], apiKey: str(o.apiKey) || s[`${prefix}ApiKey`], model: str(o.model) || s[`${prefix}Model`] };
+};
+handle('anthropic:models', (o = {}) => anthropic.listModels({ apiKey: str(o.apiKey) || settings.get().anthropicKey }));
+// Yerel model sunucusu (Ollama, LM Studio, llama.cpp…): modeller ve metin + şemalı deneme.
+handle('local:models', (o) => {
+  const { baseUrl, apiKey } = serverArgs('local', o);
+  return localllm.listModels({ baseUrl, apiKey });
 });
-handle('gemini:test', async () => {
+// NVIDIA NIM (harici OpenAI uyumlu API): aynı istemci, adres ve anahtar ayarlardan.
+handle('nim:models', (o) => {
+  const { baseUrl, apiKey } = serverArgs('nim', o);
+  if (!apiKey) throw new Error('Önce NVIDIA NIM API anahtarını girin (build.nvidia.com → API Keys).');
+  return localllm.listModels({ baseUrl, apiKey });
+});
+handle('nim:test', async (o) => {
+  const { baseUrl, apiKey, model } = serverArgs('nim', o);
+  if (!apiKey) throw new Error('NVIDIA NIM API anahtarı yok.');
+  if (!model) throw new Error('NIM modeli seçilmemiş: "Modelleri getir" ile listeyi çekip Modeller → Yönetici\'den seçin.');
+  // Deneme isteği uzun beklemez: model yanıt vermiyorsa (NIM'de bazı modeller dakikalarca sessiz kalabiliyor) 60 sn'de bildirilir.
+  const args = { baseUrl, apiKey, model, timeoutMs: 60000 };
+  const text = await localllm.generate({ ...args, parts: [{ text: 'Reply with exactly: OK' }], temperature: 0, maxOutputTokens: 64 });
+  const json = await localllm.generate({ ...args, parts: [{ text: 'Return a JSON object with ok set to true.' }], schema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'] }, temperature: 0, maxOutputTokens: 256 });
+  if (json?.ok !== true) throw new Error(`NIM modelinin şemalı yanıtı beklenen gibi değil: ${JSON.stringify(json).slice(0, 120)}.`);
+  return { model, reply: `${text.trim().slice(0, 40)} · JSON ✓` };
+});
+handle('local:test', async (o) => {
+  const { baseUrl, apiKey, model } = serverArgs('local', o);
+  if (!model) throw new Error('Yerel model seçilmemiş: "Modelleri getir" ile listeyi çekip Modeller → Yönetici\'den seçin.');
+  const args = { baseUrl, apiKey, model, timeoutMs: 60000 };
+  const text = await localllm.generate({ ...args, parts: [{ text: 'Reply with exactly: OK' }], temperature: 0, maxOutputTokens: 64 });
+  const json = await localllm.generate({ ...args, parts: [{ text: 'Return a JSON object with ok set to true.' }], schema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'] }, temperature: 0, maxOutputTokens: 256 });
+  if (json?.ok !== true) throw new Error(`Yerel modelin şemalı yanıtı beklenen gibi değil: ${JSON.stringify(json).slice(0, 120)}. Bu model yönetici işleri için uygun olmayabilir.`);
+  return { model, reply: `${text.trim().slice(0, 40)} · JSON ✓` };
+});
+handle('anthropic:test', async (o = {}) => {
   const s = settings.get();
-  const text = await gemini.generate({ apiKey: s.geminiKey, model: s.geminiModel, parts: [{ text: 'Reply with exactly: OK' }], temperature: 0 });
-  return { model: s.geminiModel, reply: text.trim().slice(0, 50) };
+  const apiKey = str(o.apiKey) || s.anthropicKey;
+  const model = str(o.model) || s.anthropicModel;
+  if (!apiKey) throw new Error('Anthropic API anahtarı yok: alana yapıştırın ya da Ayarlar\'a kaydedin.');
+  const text = await anthropic.generate({ apiKey, model, parts: [{ text: 'Reply with exactly: OK' }], maxOutputTokens: 256, effort: 'low' });
+  // Yönetici adımlarının çoğu şemalı (JSON) çağrıdır: test o yolu da dener, yoksa ilk planlamada patlar.
+  const json = await anthropic.generate({ apiKey, model, parts: [{ text: 'Return ok=true.' }], schema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'] }, maxOutputTokens: 256, effort: 'low' });
+  if (json?.ok !== true) throw new Error(`Claude API şemalı yanıtı beklenen gibi değil: ${JSON.stringify(json).slice(0, 120)}`);
+  return { model, reply: `${text.trim().slice(0, 40)} · JSON ✓` };
+});
+// Claude CLI yöneticisi: metin ve şemalı (JSON) yol birlikte denenir (yönetici adımlarının çoğu şemalıdır).
+handle('claudecli:test', async () => {
+  const s = settings.get();
+  const model = settings.managerClaudeModelOf(s);
+  const text = await claudecli.generate({ settings: s, model, parts: [{ text: 'Reply with exactly: OK' }], effort: 'low' });
+  const json = await claudecli.generate({ settings: s, model, parts: [{ text: 'Return ok=true.' }], schema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'] }, effort: 'low' });
+  if (json?.ok !== true) throw new Error(`Claude CLI şemalı yanıtı beklenen gibi değil: ${JSON.stringify(json).slice(0, 120)}`);
+  return { model: claudeModelLabel(model), reply: `${text.trim().slice(0, 40)} · JSON ✓` };
 });
 
 // ---------- Ajan bağlantıları: kurulum → giriş → test ----------
 handle('agents:detect', (opts) => agents.detect(settings.get(), opts || {}));
+// OpenCode'un gördüğü modeller ("sağlayıcı/model"): yapılandırılmış sağlayıcılar + ücretsiz modeller.
+handle('opencode:models', async () => {
+  const bin = agents.resolveBin('opencode', settings.get());
+  if (!bin) throw new Error('OpenCode bulunamadı. Kurulum: npm install -g opencode-ai');
+  const r = await runner.run({ command: bin, args: ['models'], env: agents.agentRunEnv('opencode'), timeoutMs: 60000, tailSize: 200000 });
+  const ids = String(r.stdout || '').split(/\r?\n/).map((l) => l.trim()).filter((l) => /^[\w.-]+\/\S+$/.test(l));
+  if (!ids.length) throw new Error(`OpenCode model listesi alınamadı: ${(r.stderr || r.stdout || '').trim().slice(-300)}`);
+  return ids.map((id) => ({ id, label: id }));
+});
 // Yalnızca oturum durumu (hızlı): giriş penceresi açıkken arayüz bununla yoklar.
 handle('agents:auth', (agentId) => {
   agentOf(agentId);
@@ -376,16 +415,26 @@ handle('agents:update', (agentId) => {
 handle('agents:test', async (agentId) => {
   agentOf(agentId);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sonda-test-'));
-  const s = { ...settings.get(), claudeEffort: '', agentTimeoutMin: 3 };
+  const saved = settings.get();
+  // Codex modeli rolüne göre çözülür (NIM'de rol başına NIM modeli; OpenAI alanındaki eski ad NIM'e gitmez), orkestratördeki gibi.
+  const s = { ...saved, claudeEffort: '', agentTimeoutMin: 2, codexModel: codexModelFor(saved, 'coder') };
+  // Deneme isteğinde 90 sn içinde tek satır çıktı yoksa model / sağlayıcı yanıt vermiyordur: 2 dakikalık zaman aşımı beklenmez.
+  const model = agentId === 'claude' ? claudeModelLabel(claudeModelOf(s)) : agentId === 'opencode' ? s.opencodeModel || 'OpenCode\'un varsayılan modeli' : s.codexModel || 'Codex\'in varsayılan modeli';
   try {
-    const r = await agents.runAgent({ agentId, settings: s, cwd: dir, prompt: 'Reply with exactly the word OK and nothing else. Do not use any tools.', onLog: () => {} });
+    const r = await agents.runAgent({ agentId, settings: s, cwd: dir, prompt: 'Reply with exactly the word OK and nothing else. Do not use any tools.', onLog: () => {}, firstOutputMs: 90000 });
     agents.rememberLiveCheck(agentId, s, r.ok);
-    if (!r.ok) throw new Error(r.error);
+    if (!r.ok) {
+      if (r.noOutput || /zaman aşımı/.test(r.error || '')) throw new Error(`${model} yanıt vermedi (${r.noOutput ? '90 saniye' : '2 dakika'}). Model ya da sağlayıcı takılmış olabilir; Ayarlar → Modeller\'den başka bir model seç${agentId === 'opencode' ? ' (ör. ücretsiz opencode/big-pickle)' : ''}.`);
+      throw new Error(r.error);
+    }
     return { reply: (r.text || '').trim().slice(0, 80) };
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// Terminalde çalışan giriş komutu (Claude kendi akışını kullanır): Codex OpenAI girişi, OpenCode sağlayıcı anahtarı.
+const LOGIN_ARGS = { codex: 'login', opencode: 'auth login' };
 
 // Giriş akışını kullanıcının terminalinde açar: tarayıcıda Claude hesabıyla (abonelik) giriş yapılır.
 // Sonda oturumu kendiliğinden algılar (arayüz `agents:auth` ile yoklar).
@@ -398,7 +447,7 @@ handle('agents:login', (agentId) => {
     const q = `"${bin}"`;
     const script = agentId === 'claude'
       ? `@echo off\r\necho Sonda Agent - Claude hesabina giris\r\necho Tarayicida giris sayfasi acilacak. Claude (Pro / Max) hesabinizla giris yapip izin verin.\r\necho.\r\n${q} auth login --claudeai\r\necho.\r\necho Giris tamamlandiysa bu pencereyi kapatabilirsiniz; Sonda baglantiyi kendiliginden algilar.\r\npause\r\n`
-      : `@echo off\r\n${q} login\r\npause\r\n`;
+      : `@echo off\r\n${agentId === 'opencode' ? `set "XDG_DATA_HOME=${agents.opencodeDataHome()}"\r\n` : ''}${q} ${LOGIN_ARGS[agentId]}\r\npause\r\n`;
     const file = path.join(dir, `sonda-${agentId}-giris.cmd`);
     fs.writeFileSync(file, script);
     spawn('cmd.exe', ['/c', 'start', '""', 'cmd', '/k', file], { detached: true, stdio: 'ignore' }).unref();
@@ -407,7 +456,7 @@ handle('agents:login', (agentId) => {
   const q = `'${bin.replace(/'/g, `'\\''`)}'`;
   const body = agentId === 'claude'
     ? `clear\necho "Sonda Agent · Claude hesabına giriş"\necho "Tarayıcıda giriş sayfası açılacak. Claude (Pro / Max) hesabınla giriş yapıp izin ver."\necho\n${q} auth login --claudeai\nrc=$?\necho\nif [ $rc -eq 0 ]; then echo "✓ Giriş tamamlandı. Bu pencereyi kapatabilirsin; Sonda bağlantıyı kendiliğinden algılar."; else echo "Giriş tamamlanamadı (kod $rc). Sonda'da \\"Giriş yap\\"a tekrar basabilirsin."; fi\n`
-    : `${q} login\n`;
+    : `${agentId === 'opencode' ? `export XDG_DATA_HOME='${agents.opencodeDataHome().replace(/'/g, `'\\''`)}'\n` : ''}${q} ${LOGIN_ARGS[agentId]}\n`;
   const file = path.join(dir, `sonda-${agentId}-giris.command`);
   fs.writeFileSync(file, `#!/bin/zsh -l\ncd ~\n${body}`, { mode: 0o755 });
   if (process.platform === 'darwin') return shell.openPath(file).then((err) => {
@@ -423,7 +472,7 @@ handle('agents:logout', async (agentId) => {
   if (runningOrchs().length) throw new Error('Şu anda çalışan iş var. Önce işleri durdurun ya da bitmesini bekleyin.');
   const bin = agents.resolveBin(agentId, settings.get());
   if (!bin) throw new Error('CLI bulunamadı.');
-  const r = await runner.run({ command: bin, args: agentId === 'claude' ? ['auth', 'logout'] : ['logout'], env: agentEnv(), timeoutMs: 30000, tailSize: 4000 });
+  const r = await runner.run({ command: bin, args: agentId === 'codex' ? ['logout'] : ['auth', 'logout'], env: agentEnv(), timeoutMs: 30000, tailSize: 4000 });
   agents.rememberLiveCheck(agentId, settings.get(), false);
   if (r.code !== 0) throw new Error(`Çıkış yapılamadı: ${(r.stderr || r.stdout || r.error || '').trim().slice(-300)}`);
   return true;

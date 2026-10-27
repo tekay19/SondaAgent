@@ -8,6 +8,16 @@ const { jsonFromText, agentRunEnv } = require('./run');
 
 const PLAN_LABEL = { max: 'Max', pro: 'Pro', team: 'Team', enterprise: 'Enterprise' };
 
+// `opencode auth list` çıktısı: "N credentials" ve sağlayıcı satırları (ör. "● Nvidia api"). Renk kodları ayıklanır.
+function opencodeCredentials(text) {
+  const plain = String(text || '').replace(/\x1b\[[0-9;]*m/g, '');
+  const n = Number(plain.match(/(\d+)\s+credentials?/i)?.[1] || 0);
+  const providers = [...plain.matchAll(/^[\s│]*[●○•]\s+(\S[^\n]*?)\s+(api|oauth|[a-z-]+)\s*$/gim)].map((m) => m[1].trim());
+  return { count: n, providers };
+}
+
+const LOGIN_COMMAND = { claude: 'claude auth login', codex: 'codex login', opencode: 'opencode auth login' };
+
 /**
  * Oturum durumu (ana süreci kilitlemeden): { loggedIn: true | false | null, method, plan, account }.
  * Claude için `claude auth status` JSON çıktısı okunur: giriş türü (claude.ai aboneliği / API) ve abonelik planı.
@@ -15,9 +25,16 @@ const PLAN_LABEL = { max: 'Max', pro: 'Pro', team: 'Team', enterprise: 'Enterpri
 async function authInfo(id, bin) {
   const out = { loggedIn: null, method: null, plan: null, account: null };
   if (!bin) return out;
-  const args = id === 'claude' ? ['auth', 'status'] : ['login', 'status'];
+  const args = id === 'claude' ? ['auth', 'status'] : id === 'opencode' ? ['auth', 'list'] : ['login', 'status'];
   const r = await runner.run({ command: bin, args, env: agentRunEnv(id), timeoutMs: 15000, tailSize: 20000 });
   const text = `${r.stdout || ''}\n${r.stderr || ''}`;
+  if (id === 'opencode') {
+    // Sağlayıcı anahtarı yoksa da OpenCode'un ücretsiz modelleri (opencode/*-free) çalışabilir: "giriş yok" sayılmaz.
+    const c = opencodeCredentials(text);
+    out.loggedIn = c.count > 0 ? true : null;
+    out.plan = c.count > 0 ? `${c.providers.join(', ') || c.count} sağlayıcı` : null;
+    return out;
+  }
   if (id === 'claude') {
     const info = jsonFromText(text);
     if (info && typeof info.loggedIn === 'boolean') {
@@ -74,6 +91,15 @@ async function detect(settings, { force = false } = {}) {
     const auth = await authInfo(id, bin);
     let { loggedIn } = auth;
     let authError = null;
+    // Codex yerel modelle (--oss) ya da NVIDIA NIM ile çalışıyorsa OpenAI girişi gerekmez: kurulu olması (NIM'de anahtar) yeter.
+    if (bin && id === 'codex' && settings.codexProvider === 'local') {
+      loggedIn = true;
+      auth.plan = `yerel model · ${settings.codexLocalProvider === 'lmstudio' ? 'LM Studio' : 'Ollama'}`;
+    } else if (bin && id === 'codex' && settings.codexProvider === 'nim') {
+      loggedIn = !!settings.nimApiKey;
+      auth.plan = loggedIn ? 'NVIDIA NIM' : null;
+      if (!loggedIn) authError = 'NVIDIA NIM API anahtarı girilmemiş (Ayarlar → Bağlantılar → NVIDIA NIM).';
+    }
     if (bin && id === 'claude' && loggedIn !== true) {
       const cached = liveCheckCache.get(bin);
       const fresh = cached && Date.now() - cached.at < (cached.r.ok ? LIVE_OK_TTL : LIVE_FAIL_TTL) && !force;
@@ -102,12 +128,12 @@ async function detect(settings, { force = false } = {}) {
       plan: auth.plan,
       account: auth.account,
       subscription: id === 'claude' && loggedIn ? auth.method === 'claude.ai' || !!auth.plan : null,
-      model: id === 'claude' ? claudeModelOf(settings) : settings.codexModel || '',
-      modelLabel: id === 'claude' ? claudeModelLabel(claudeModelOf(settings)) : settings.codexModel || '',
+      model: id === 'claude' ? claudeModelOf(settings) : id === 'opencode' ? settings.opencodeModel || '' : settings.codexModel || '',
+      modelLabel: id === 'claude' ? claudeModelLabel(claudeModelOf(settings)) : id === 'opencode' ? settings.opencodeModel || '' : settings.codexModel || '',
       canInstall: id === 'claude' && !bin,
       install: a.install,
       login: a.login,
-      loginCommand: id === 'claude' ? 'claude auth login' : 'codex login',
+      loginCommand: LOGIN_COMMAND[id] || `${id} login`,
     };
   }
   return out;
@@ -121,4 +147,4 @@ function rememberLiveCheck(agentId, settings, ok) {
   else liveCheckCache.delete(bin);
 }
 
-module.exports = { authInfo, detect, rememberLiveCheck };
+module.exports = { authInfo, detect, rememberLiveCheck, opencodeCredentials };

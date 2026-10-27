@@ -1,4 +1,4 @@
-// Gemini (planlayıcı / denetçi) ve kodlama ajanları için istemler.
+// Yönetici (planlayıcı / denetçi) ve kodlama ajanları için istemler.
 // Ajan istemleri İngilizcedir (ajanlar en tutarlı bu şekilde çalışıyor);
 // kullanıcıya görünen alanlar kullanıcının dilinde üretilir.
 // İstemler konularına göre aynı klasördeki modüllerdedir; bu dosya eski tek-dosya arayüzünü (dışa aktarılan adları) korur:
@@ -6,7 +6,7 @@
 //   context.js — Ajanlara ve inceleyicilere verilen proje bağlamı: .env, tasarım, hafıza, gereksinimler, dersler, açık bulgular.
 //   planning.js — Planlama: keşif, gereksinimler, şartname bölümleri, görev planı, Claude planı, yönetici değerlendirmesi, plan eleştirisi.
 //   task.js — Görev istemleri: kodlama, düzeltme, teknik brif, TDD testleri ve proje hafızası.
-//   review.js — İnceleme istemleri: ilk inceleme (Gemini ya da ajan), derin inceleme, faz kapısı, son kabul, güvenlik denetimi.
+//   review.js — İnceleme istemleri: ilk inceleme (yönetici ya da ajan), derin inceleme, faz kapısı, son kabul, güvenlik denetimi.
 //   specialists.js — Uzman denetim paneli: uzman tanımları, görev sonu incelemesi, bulgu doğrulama ve yeniden doğrulama.
 //   maintenance.js — Bakım işleri (özellik ekleme, hata düzeltme, refactor): salt okunur analiz ve plan istemi.
 //   report.js — Teslim raporu: rapor istemi, bulgu defteri ve uzman paneli özetleri.

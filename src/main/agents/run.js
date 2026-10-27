@@ -13,8 +13,39 @@ const { resolveBin } = require('./install');
 // Claude hesabındaki bağlayıcılar (claude.ai MCP) yalnızca kullanıcı açtıysa ve yalnızca kodlama oturumunda yüklenir.
 // Codex API anahtarıyla giriş yapılmış olabilir (ortam değişkeni): bu anahtarlar yalnızca Codex oturumuna gider.
 const CODEX_AUTH_VARS = ['OPENAI_API_KEY', 'CODEX_API_KEY'];
+// Ajan bu süre içinde hiç çıktı vermezse (ör. seçili model sağlayıcısı yanıt vermiyor) oturum kapatılır; tam zaman
+// aşımı beklenmez. Claude ve Codex ilk olayı anında yazar; OpenCode ilk olayı modelden ilk yanıt gelince yazar.
+const FIRST_OUTPUT_MS = 5 * 60 * 1000;
+
+/**
+ * OpenCode'un Sonda'ya ait veri klasörü. OpenCode oturumlarını, veritabanını ve sağlayıcı anahtarlarını
+ * $XDG_DATA_HOME/opencode altında tutar; masaüstü OpenCode uygulaması aynı varsayılan klasörü başka bir sürümle
+ * kullanınca veritabanı şeması çakışıyordu ("no such column"). Sonda kendi klasörünü verir; ilk kullanımda kullanıcının
+ * var olan sağlayıcı anahtarları (auth.json) oraya kopyalanır ki `opencode auth login` yeniden gerekmesin.
+ * Dönen değer XDG_DATA_HOME'a yazılacak kök klasördür (OpenCode altına "opencode" ekler).
+ */
+function opencodeDataHome({ root = process.env.SONDA_OPENCODE_DATA || path.join(os.homedir(), '.local', 'share', 'sonda-opencode'), seedFrom = path.join(os.homedir(), '.local', 'share', 'opencode', 'auth.json') } = {}) {
+  const dir = path.join(root, 'opencode');
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const auth = path.join(dir, 'auth.json');
+    if (!fs.existsSync(auth) && fs.existsSync(seedFrom)) fs.copyFileSync(seedFrom, auth);
+  } catch {
+    /* klasör oluşturulamadıysa OpenCode kendi varsayılanına düşer */
+  }
+  return root;
+}
+
+
+
 function agentRunEnv(agentId, settings = {}, mode = 'code') {
-  if (agentId === 'codex') return agentEnv(Object.fromEntries(CODEX_AUTH_VARS.filter((k) => process.env[k]).map((k) => [k, process.env[k]])));
+  if (agentId === 'codex') {
+    const extra = Object.fromEntries(CODEX_AUTH_VARS.filter((k) => process.env[k]).map((k) => [k, process.env[k]]));
+    // NIM anahtarı yalnızca Codex NIM ile kodlarken ve yalnızca bu oturuma gider.
+    if (settings.codexProvider === 'nim' && settings.nimApiKey) extra.NVIDIA_API_KEY = settings.nimApiKey;
+    return agentEnv(extra);
+  }
+  if (agentId === 'opencode') return agentEnv({ XDG_DATA_HOME: opencodeDataHome() });
   return agentEnv(agentId === 'claude' && (!settings.claudeAllowMcp || mode === 'review') ? { ENABLE_CLAUDEAI_MCP_SERVERS: 'false' } : {});
 }
 
@@ -72,7 +103,7 @@ function failureKind(errText) {
   return 'error';
 }
 
-async function runAgent({ agentId, settings, cwd, prompt, resumeId, onLog, signal, mode = 'code', schema, protectEnv = false }) {
+async function runAgent({ agentId, settings, cwd, prompt, resumeId, onLog, signal, mode = 'code', schema, protectEnv = false, firstOutputMs = FIRST_OUTPUT_MS }) {
   const adapter = ADAPTERS[agentId];
   const bin = resolveBin(agentId, settings);
   if (!bin) {
@@ -95,6 +126,7 @@ async function runAgent({ agentId, settings, cwd, prompt, resumeId, onLog, signa
     input: prompt,
     signal,
     timeoutMs: settings.agentTimeoutMin * 60 * 1000,
+    firstOutputMs,
     onStdout: (line) => {
       for (const l of parser.onLine(line)) onLog(l);
     },
@@ -118,6 +150,7 @@ async function runAgent({ agentId, settings, cwd, prompt, resumeId, onLog, signa
 
   if (signal?.aborted) return { ok: false, aborted: true, error: 'Durduruldu', sessionId: st.sessionId };
   if (res.error) return { ok: false, fatal: true, error: `${adapter.label} başlatılamadı: ${res.error}` };
+  if (res.noOutput) return { ok: false, noOutput: true, error: `${adapter.label} ${Math.max(1, Math.round(firstOutputMs / 60000))} dakika boyunca hiç çıktı vermedi: seçili model ya da sağlayıcı yanıt vermiyor olabilir. Ayarlar → Modeller'den başka bir model seçin.`, text: st.text, sessionId: st.sessionId };
   if (res.timedOut) return { ok: false, error: `Ajan ${settings.agentTimeoutMin} dakikada bitiremedi (zaman aşımı).`, text: st.text, sessionId: st.sessionId };
 
   const errText = st.errorText || (res.code !== 0 ? stderrLines.slice(-15).join('\n') : '');
@@ -151,4 +184,4 @@ async function runAgent({ agentId, settings, cwd, prompt, resumeId, onLog, signa
   return { ok: true, text: st.text, structured, transcript, sessionId: st.sessionId, costUsd: st.costUsd || 0 };
 }
 
-module.exports = { agentRunEnv, jsonFromText, conforms, failureKind, runAgent };
+module.exports = { agentRunEnv, opencodeDataHome, jsonFromText, conforms, failureKind, runAgent };

@@ -109,12 +109,13 @@ test('Klasör denetimi: arayüz yalnızca kullanıcının seçtiği ya da biline
   const { folderGuard } = require('../src/main/ipcutil');
   const known = ['/Users/a/proje-1'];
   const g = folderGuard({ initial: ['/Users/a/son'], known: () => known });
-  assert.strictEqual(g.check('/Users/a/son'), '/Users/a/son', 'açılıştaki son klasör');
+  // Windows'ta path.resolve köksüz yola sürücü harfi ekler; dönen değer her zaman çözümlenmiş yoldur.
+  assert.strictEqual(g.check('/Users/a/son'), path.resolve('/Users/a/son'), 'açılıştaki son klasör');
   assert.strictEqual(g.check('/Users/a/proje-1/'), path.resolve('/Users/a/proje-1'), 'kayıtlı işin klasörü');
   assert.throws(() => g.check('/etc'), /seçin/);
   assert.throws(() => g.check('relative/dir'), /seçin/);
   assert.throws(() => g.check(42), /seçin/);
   g.allow('/Users/a/yeni');
-  assert.strictEqual(g.check('/Users/a/yeni'), '/Users/a/yeni', 'bu oturumda seçilen klasör');
+  assert.strictEqual(g.check('/Users/a/yeni'), path.resolve('/Users/a/yeni'), 'bu oturumda seçilen klasör');
   assert.throws(() => g.check('/Users/a/yeni/../../b'), /seçin/);
 });

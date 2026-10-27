@@ -1,11 +1,13 @@
-// Sonda orkestratörü: Gemini keşfeder ve planlar → Claude planı eleştirir → ajan kodlar (isteğe
-// bağlı TDD) → Sonda doğrular → Gemini inceler → faz kapılarında Claude derin inceleme + Gemini +
+// Sonda orkestratörü: yönetici (Claude) keşfeder ve planı onaylar → Claude mühendis planlar → ajan kodlar (isteğe
+// bağlı TDD) → Sonda doğrular → bağımsız inceleme → faz kapılarında Claude derin inceleme + uzman paneli +
 // güvenlik → gerekirse ajan düzeltir → son test (tarayıcı + ekran görüntüsü) → rapor.
-// Bu dosya çekirdektir (durum, günlük, commit, ajan/Gemini çağrıları, iptal). Diğer yöntemler sorumluluklarına
+// Bu dosya çekirdektir (durum, günlük, commit, ajan/yönetici çağrıları, iptal). Diğer yöntemler sorumluluklarına
 // göre aynı klasördeki parçalarda tanımlıdır ve sınıfa eklenir: planning, maintenance, pipeline, task, review, findings.
 const settings = require('../settings');
-const gemini = require('../gemini');
 const anthropic = require('../anthropic');
+const claudecli = require('../claudecli');
+const opencodecli = require('../opencodecli');
+const localllm = require('../localllm');
 const agents = require('../agents');
 const project = require('../project');
 const jobs = require('../jobs');
@@ -14,7 +16,7 @@ const secrets = require('../secrets');
 const envfile = require('../envfile');
 const net = require('../net');
 const P = require('../prompts');
-const { claudeModelOf, claudeModelLabel, briefModelOf } = require('../models');
+const { claudeModelOf, claudeModelLabel, briefModelOf, roleModelOf, codexModelFor } = require('../models');
 const { ACTIVE_TASK, guessLang, mixin } = require('./shared');
 
 // Bir adımda bağlantı kesintisi nedeniyle en çok kaç kez yeniden denenir (her deneme bağlantının gelmesini bekler).
@@ -73,9 +75,6 @@ class Orchestrator {
   log(src, lvl, text) {
     if (!this.job || text == null) return;
     let line = String(text);
-    // Yönetici Claude API iken günlükte Gemini adı geçmez: Sonda'da Gemini yalnızca yönetici rolündedir, o rolü de
-    // şu an Claude API yapıyor (bir adımı yapmayanın adı yazılmaz). Kaynak fark etmez: Sonda satırları da aynı rolden söz eder.
-    if (settings.managerBy() === 'anthropic') line = line.replace(/\bGemini\b/g, 'Claude API');
     const entry = { t: Date.now(), src, lvl, text: this.redactor()(line) };
     jobs.appendLog(this.job.id, entry);
     this.emit({ type: 'log', jobId: this.job.id, entry });
@@ -116,7 +115,7 @@ class Orchestrator {
   }
 
   // Kullanıcının girdiği değerleri projenin .env dosyasına yazar (ajan dosyayı ezmiş olsa bile geri koyar)
-  // ve ajanların / Gemini'nin göreceği ad listesini günceller. Değerler hiçbir isteme girmez.
+  // ve ajanların / yöneticinin göreceği ad listesini günceller. Değerler hiçbir isteme girmez.
   syncEnv() {
     const job = this.job;
     if (!job) return;
@@ -190,7 +189,7 @@ class Orchestrator {
   }
 
   /**
-   * Paralel adımlar (Gemini incelemesi + Claude derin inceleme + uzman paneli…). Biri beklenmedik bir hata
+   * Paralel adımlar (yönetici incelemesi + Claude derin inceleme + uzman paneli…). Biri beklenmedik bir hata
    * verirse diğerleri arkada çalışmaya devam ETMEZ: hepsi durdurulur, bitmeleri beklenir ve ilk hata yukarı
    * taşınır. Aksi halde iş "hata" durumuna geçtikten sonra da ajan oturumları sürer ve "Sürdür" ile başlayan
    * yeni çalışmanın dosyalarına dokunabilirdi.
@@ -248,7 +247,7 @@ class Orchestrator {
   }
 
   // Çalışma sırasında (veya onaydan önce) kullanıcının verdiği ek talimat.
-  // Sonraki tüm ajan istemlerine ve Gemini incelemelerine eklenir.
+  // Sonraki tüm ajan istemlerine ve yönetici incelemelerine eklenir.
   addNote(text) {
     const note = String(text || '').trim();
     if (!note || !this.job) throw new Error('Talimat boş.');
@@ -316,61 +315,82 @@ class Orchestrator {
   }
 
   async gem({ system, parts, schema, temperature, maxOutputTokens, progressLabel }) {
-    const s = settings.get();
+    const s = this.cfg();
     let lastLog = 0;
-    // Kullanıcının gizli değerleri (diff, dosya içeriği, test çıktısı içinde olsa bile) Gemini'ye gitmez.
+    // Kullanıcının gizli değerleri (diff, dosya içeriği, test çıktısı içinde olsa bile) yöneticiye gitmez.
     const red = this.redactor();
-    // Yönetici: Gemini (varsayılan) ya da Claude API. İkisi aynı sözleşmeyi taşır; yalnızca anahtar, model, şema
-    // biçimi (Claude standart JSON Schema ister) ve kullanım sayacı değişir.
-    const viaClaude = s.managerBy === 'anthropic';
-    const client = viaClaude ? anthropic : gemini;
+    // Yönetici: Claude CLI (varsayılan; abonelik), Claude API ya da yerel model (OpenAI uyumlu sunucu). Üçü aynı
+    // sözleşmeyi taşır; yalnızca kimlik (CLI oturumu / anahtar / adres) ve model değişir. Şemalar standart JSON Schema'dır.
+    const by = settings.managerBy(s);
+    // Yerel model ve NVIDIA NIM aynı (OpenAI uyumlu) istemciyi kullanır; yalnızca adres ve anahtar değişir. OpenCode kendi
+    // sağlayıcı anahtarlarıyla CLI üzerinden çalışır (anahtar ve adres Sonda'da yoktur).
+    const client = by === 'anthropic' ? anthropic : by === 'local' || by === 'nim' ? localllm : by === 'opencode' ? opencodecli : claudecli;
+    const who = settings.managerLabel(s);
     const args = {
-      apiKey: viaClaude ? s.anthropicKey : s.geminiKey,
-      model: viaClaude ? s.anthropicModel : s.geminiModel,
+      apiKey: by === 'anthropic' ? s.anthropicKey : by === 'local' ? s.localApiKey : by === 'nim' ? s.nimApiKey : undefined,
+      baseUrl: by === 'local' ? s.localBaseUrl : by === 'nim' ? s.nimBaseUrl : undefined,
+      model: by === 'anthropic' ? s.anthropicModel : by === 'local' ? s.localModel : by === 'nim' ? s.nimModel : by === 'opencode' ? opencodecli.managerModelOf(s) : settings.managerClaudeModelOf(s),
+      settings: s,
       system: system && red(system),
       parts: (parts || []).map((p) => (typeof p?.text === 'string' ? { ...p, text: red(p.text) } : p)),
-      schema: viaClaude && schema ? P.toJsonSchema(schema) : schema,
+      schema: schema ? P.toJsonSchema(schema) : schema,
       temperature,
       maxOutputTokens,
       signal: this.signal,
       onUsage: (u) => {
-        if (viaClaude) this.job.stats.managerTokens = (this.job.stats.managerTokens || 0) + (u.totalTokenCount || 0);
-        else this.job.stats.geminiTokens += u.totalTokenCount || 0;
+        this.job.stats.managerTokens = (this.job.stats.managerTokens || 0) + (u.totalTokenCount || 0);
       },
       onProgress: (chars) => {
         if (!progressLabel || Date.now() - lastLog < 8000) return;
         lastLog = Date.now();
-        this.log('gemini', 'dim', `${progressLabel}… ${Math.round(chars / 1000)}K karakter`);
+        this.log('manager', 'dim', `${progressLabel}… ${Math.round(chars / 1000)}K karakter`);
       },
     };
     // İstemcinin kendi yeniden denemeleri (~4 dk) bağlantı kesintisine yetmediyse bağlantı beklenir.
-    for (let offline = 1; ; offline++) {
+    // Claude CLI kullanım limitine takılırsa (abonelik) sıfırlanma saatine kadar beklenir ve aynı çağrı yinelenir.
+    for (let offline = 1, waits = 0; ; ) {
       try {
         return await client.generate(args);
       } catch (e) {
-        if (this.signal?.aborted || offline > MAX_OFFLINE_RETRIES || !client.isNetworkError(e)) throw e;
-        await this.awaitNetwork(viaClaude ? 'Claude API' : 'Gemini', viaClaude ? net.HOSTS.claude : net.HOSTS.gemini, e.message, offline);
+        if (this.signal?.aborted) throw e;
+        if (e?.limited && waits < 12) {
+          waits += 1;
+          const until = Math.max(e.resetAt || 0, Date.now() + 60000) + 60000;
+          const hhmm = new Date(until).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+          this.log('system', 'warn', `${who} kullanım limitine takıldı (${String(e.message).split('\n')[0].slice(0, 160)}). ${hhmm}'de otomatik devam edilecek — uygulamayı açık bırakın.`);
+          this.update({ waitUntil: until });
+          await this.sleep(until - Date.now());
+          this.update({ waitUntil: null });
+          continue;
+        }
+        if (offline > MAX_OFFLINE_RETRIES || !client.isNetworkError(e)) throw e;
+        if (by === 'local') throw e; // yerel sunucu: internet beklemek anlamsız, hata olduğu gibi bildirilir
+        await this.awaitNetwork(who, by === 'nim' ? net.hostOf(s.nimBaseUrl) : by === 'opencode' ? net.HOSTS.opencode : net.HOSTS.claude, e.message, offline);
+        offline += 1;
       }
     }
   }
 
   // Kodlayan ya da inceleyen ajanı çalıştırır. mode: 'code' (yazma yetkili) | 'review' (salt okunur).
-  // `model`: yalnızca bu oturum için Claude modeli (ör. teknik brif için Fable 5.1); verilmezse Ayarlar'daki model.
-  async runAgent(prompt, { resumeId, label, mode = 'code', schema, agentId, src = 'agent', timeoutMin, effort, model, quiet = false } = {}) {
+  // `model`: yalnızca bu oturum için Claude modeli (ör. teknik brif için Fable 5.1). Verilmezse oturumun rolüne göre
+  // Ayarlar'daki model: `role` ('planner' | 'coder' | 'reviewer' | 'brief'); rol verilmezse yazma yetkili oturum kodlayıcı,
+  // salt okunur oturum inceleyicidir.
+  async runAgent(prompt, { resumeId, label, mode = 'code', schema, agentId, src = 'agent', timeoutMin, effort, model, role, quiet = false } = {}) {
     const job = this.job;
     const id = agentId || job.agent;
     const adapter = agents.ADAPTERS[id];
+    const roleOf = role || (mode === 'review' ? 'reviewer' : 'coder');
     let currentPrompt = prompt;
     let currentResume = resumeId;
     let offline = 0;
     for (let waits = 0; ; waits++) {
-      const s = settings.get();
+      const s = this.cfg();
       job.stats.agentRuns += 1;
       if (mode === 'code') this.syncEnv();
       this.log('system', 'info', `${adapter.label} ${mode === 'review' ? 'inceliyor (salt okunur)' : 'çalışıyor'}${label ? ` · ${label}` : ''}…`);
       const res = await agents.runAgent({
         agentId: id,
-        settings: { ...s, ...(timeoutMin ? { agentTimeoutMin: Math.min(s.agentTimeoutMin, timeoutMin) } : {}), ...(effort !== undefined ? { claudeEffort: effort } : {}), ...(model ? { claudeModel: model } : {}) },
+        settings: { ...s, ...(timeoutMin ? { agentTimeoutMin: Math.min(s.agentTimeoutMin, timeoutMin) } : {}), ...(effort !== undefined ? { claudeEffort: effort } : {}), claudeModel: model || (id === 'claude' ? roleModelOf(s, roleOf) : s.claudeModel), codexModel: id === 'codex' ? this.codexModelFor(s, roleOf) : s.codexModel },
         cwd: job.projectDir,
         prompt: currentPrompt,
         resumeId: currentResume,
@@ -407,7 +427,7 @@ class Orchestrator {
         continue;
       }
       // Bağlantı kesintisi: bağlantı gelene kadar bekle, sonra aynı oturumdan devam et (salt okunur oturumlar da:
-      // yapılan araştırma kaybolmaz). Adım başarısız sayılmaz; yedek yola (ör. Gemini planlayıcı) düşülmez.
+      // yapılan araştırma kaybolmaz). Adım başarısız sayılmaz; yedek yola (ör. yönetici planlayıcı) düşülmez.
       if (res.offline && offline < MAX_OFFLINE_RETRIES) {
         offline += 1;
         await this.awaitNetwork(adapter.label, net.HOSTS[id] || net.HOSTS.claude, res.error, offline);
@@ -428,16 +448,16 @@ class Orchestrator {
   }
 
   // İnceleyici sonucu şemaya uygun teslim etmediyse (zayıf model, araç çağrılmadı) analizi kaybetme:
-  // yazdığı metni Gemini şemaya dönüştürür.
+  // yazdığı metni yönetici şemaya dönüştürür.
   async structuredFrom(res, schema, what) {
     if (res?.structured) return res.structured;
     if (!res?.ok || !res.transcript?.trim()) return null;
-    this.log('review', 'dim', `${what}: sonuç yapılandırılmış gelmedi; Gemini inceleyicinin yazdıklarını şemaya dönüştürüyor…`);
+    this.log('review', 'dim', `${what}: sonuç yapılandırılmış gelmedi; yönetici inceleyicinin yazdıklarını şemaya dönüştürüyor…`);
     try {
       return await this.gem({
         system: 'Convert the reviewer\'s written analysis below into the given JSON schema faithfully. Do not invent findings; keep every concrete finding, severity, file and fix it states. Keep the language of each field as written.',
         parts: [{ text: res.transcript }],
-        schema: gemini.toGeminiSchema(schema),
+        schema,
         temperature: 0,
       });
     } catch (e) {
@@ -466,31 +486,77 @@ class Orchestrator {
     }
   }
 
-  // Yönetici ve modeli (günlükte açıkça görünsün): "Gemini: <model>" ya da "Claude API: <model>".
+  // Yönetici ve modeli (günlükte açıkça görünsün): "Claude CLI (abonelik): <model>", "Claude API: <model>" ya da "Yerel model: <model>".
   managerNote(s) {
-    return s.managerBy === 'anthropic' ? `Claude API: ${s.anthropicModel}` : `Gemini: ${s.geminiModel}`;
+    const by = settings.managerBy(s);
+    if (by === 'anthropic') return `Claude API: ${s.anthropicModel}`;
+    if (by === 'local') return `Yerel model: ${s.localModel || '(model seçilmedi)'} @ ${s.localBaseUrl}`;
+    if (by === 'nim') return `NVIDIA NIM: ${s.nimModel || '(model seçilmedi)'}`;
+    if (by === 'opencode') return `OpenCode: ${opencodecli.managerModelOf(s) || '(OpenCode varsayılanı)'}`;
+    return `Claude CLI (abonelik): ${claudeModelLabel(settings.managerClaudeModelOf(s))}`;
   }
 
   // Kullanılan Claude modeli ve düşünme seviyesi (günlükte açıkça görünsün).
   modelNote(s) {
+    if (this.job.agent === 'opencode') {
+      const oc = ` · OpenCode: kodlayıcı ${s.opencodeModel || '(varsayılan)'} · inceleyici ${s.opencodeReviewModel || s.opencodeModel || '(varsayılan)'}`;
+      return this.reviewerId() === 'claude' ? `${oc} · inceleme: Claude ${claudeModelLabel(roleModelOf(s, 'reviewer'))}` : oc;
+    }
+    if (this.job.agent === 'codex' && s.codexProvider === 'nim') {
+      const r = (role) => this.codexModelFor(s, role) || '(model yok)';
+      const nim = ` · Codex/NIM: planlayıcı ${r('planner')} · kodlayıcı ${r('coder')} · inceleyici ${r('reviewer')}`;
+      if (this.reviewerId() !== 'claude') return nim;
+      return `${nim} · inceleme: Claude ${claudeModelLabel(roleModelOf(s, 'reviewer'))}`;
+    }
     if (this.job.agent !== 'claude' && this.reviewerId() !== 'claude') return '';
     const id = claudeModelOf(s);
     const brief = s.taskBriefing ? briefModelOf(s) : null;
-    const briefNote = !s.taskBriefing ? '' : brief && agents.resolveBin('claude', s) ? ` · brif: ${claudeModelLabel(brief)}` : ' · brif: Gemini';
-    return ` · Claude modeli: ${claudeModelLabel(id)}${claudeModelLabel(id) === id ? '' : ` (${id})`}${s.claudeEffort ? ` · düşünme: ${s.claudeEffort}` : ''}${briefNote}`;
+    const briefNote = !s.taskBriefing ? '' : brief && agents.resolveBin('claude', s) ? ` · brif: ${claudeModelLabel(brief)}` : ' · brif: yönetici';
+    // Genel modelden ayrılan roller ayrıca yazılır (planlayıcı / kodlayıcı / inceleyici).
+    const names = { planner: 'planlayıcı', coder: 'kodlayıcı', reviewer: 'inceleyici' };
+    const roles = Object.entries(names).filter(([r]) => roleModelOf(s, r) !== id).map(([r, n]) => ` · ${n}: ${claudeModelLabel(roleModelOf(s, r))}`).join('');
+    return ` · Claude modeli: ${claudeModelLabel(id)}${claudeModelLabel(id) === id ? '' : ` (${id})`}${roles}${s.claudeEffort ? ` · düşünme: ${s.claudeEffort}` : ''}${briefNote}`;
   }
 
-  // Gemini "yönetici" rolündeyken yapım döngüsünü (görev incelemesi, hafıza, faz kapısı) ajanlar yürütür.
-  agentsLead(s = settings.get()) {
-    return s.geminiRole !== 'full' && !!this.reviewerId();
+  // Codex'in bu oturumda kullanacağı model (bkz. models.codexModelFor): NIM'de rol başına NIM modeli, diğerlerinde Codex model alanı.
+  codexModelFor(s, role) {
+    return codexModelFor(s, role);
+  }
+
+  // Kodlayan / inceleyen ajanın bu rolde kullandığı model adı (günlük ve brif etiketi için).
+  agentModelFor(s, id, role) {
+    if (id === 'codex') return this.codexModelFor(s, role);
+    if (id === 'opencode') return (role === 'coder' ? s.opencodeModel : s.opencodeReviewModel || s.opencodeModel) || '';
+    return '';
+  }
+
+  // İşin kadrosuyla (job.stack: yönetici / kodlayıcı / inceleyici) ezilmiş ayarlar. İş kendi kadrosunu taşır: iş sürerken
+  // ya da sürdürülürken Ayarlar değişse de roller değişmez. Kadrosu olmayan eski işlerde Ayarlar olduğu gibi geçerlidir.
+  cfg() {
+    return settings.withStack(settings.get(), this.job?.stack);
+  }
+
+  // Anahtarsız sürümü: anahtar gerektirmeyen sık çağrılar için (bkz. settings.peek).
+  cfgPeek() {
+    return settings.withStack(settings.peek(), this.job?.stack);
+  }
+
+  // Yönetici rolü "manager" iken (varsayılan) yapım döngüsünü (görev incelemesi, hafıza, faz kapısı) ajanlar yürütür.
+  agentsLead(s = this.cfg()) {
+    return s.managerRole !== 'full' && !!this.reviewerId();
   }
 
   // Bağımsız inceleyici: Claude kuruluysa her zaman Claude (Codex ile kodlanıyorsa çapraz model);
   // değilse kodlayan ajanın salt-okunur modu.
+  // Salt okunur oturumların ajanı: varsayılan Claude (kuruluysa; Codex ile kodlanan işte çapraz model incelemesi). Ayarlar'da
+  // "kodlayan ajan" seçildiyse (Claude'suz çalışma) her zaman kodlayan ajan; o da yoksa null (yalnızca yönetici / kontroller).
   reviewerId() {
-    const s = settings.get();
+    // Anahtarlar gerekmez (yalnızca seçim ve CLI yolları): her çağrıda üç anahtarı çözmemek için anahtarsız okuma.
+    const s = this.cfgPeek();
+    const own = agents.resolveBin(this.job.agent, s) ? this.job.agent : null;
+    if (s.reviewerBy === 'agent') return own;
     if (agents.resolveBin('claude', s)) return 'claude';
-    return agents.resolveBin(this.job.agent, s) ? this.job.agent : null;
+    return own;
   }
 
   // İptal edilebilir bekleme.

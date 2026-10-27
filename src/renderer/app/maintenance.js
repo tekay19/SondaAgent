@@ -28,7 +28,8 @@ function openMaint(kind) {
   const job = state.job;
   if (!job) return;
   if (dirBusy(job.projectDir)) return toast('Bu projede şu anda çalışan bir iş var. Bitmesini bekleyin ya da durdurun.', true);
-  state.maint = { dir: job.projectDir, agent: job.agent, kind, items: { feature: [''], bugfix: [''] }, focus: '', attachments: [] };
+  // Kadro işten devralınır (eski işte kadro yoksa yalnızca kodlayıcı; gerisi Ayarlar'dan).
+  state.maint = { dir: job.projectDir, agent: job.agent, stack: job.stack || { agent: job.agent }, kind, items: { feature: [''], bugfix: [''] }, focus: '', attachments: [] };
   $('#maintTitle').textContent = job.plan?.projectName ? `${job.plan.projectName} — devam et` : 'Projede devam et';
   $('#maintDir').textContent = job.projectDir;
   $('#maintDir').title = job.projectDir;
@@ -110,7 +111,7 @@ $('#maintStartBtn').addEventListener('click', async (e) => {
   if (m.kind !== 'refactor' && !items.length) return toast(MAINT_UI[m.kind].empty, true);
   const btn = $('#maintStartBtn');
   btn.disabled = true;
-  const id = await attempt(() => api.maintain({ kind: m.kind, items, text: m.focus.trim(), projectDir: m.dir, agent: m.agent, attachments: m.attachments.filter((a) => a.supported).map((a) => ({ ...a, role: isDesignAtt(a) ? 'design' : 'doc' })) }));
+  const id = await attempt(() => api.maintain({ kind: m.kind, items, text: m.focus.trim(), projectDir: m.dir, agent: m.agent, stack: m.stack, attachments: m.attachments.filter((a) => a.supported).map((a) => ({ ...a, role: isDesignAtt(a) ? 'design' : 'doc' })) }));
   btn.disabled = false;
   if (!id) return;
   maintDlg.close();

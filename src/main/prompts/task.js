@@ -54,7 +54,7 @@ const TEST_REVIEW_SYSTEM = `You review automated tests that a QA engineer wrote 
 - an acceptance criterion or listed test has no test at all.
 verdict "fix" if any problem would push the implementation in a wrong direction or leaves a criterion untested. Be concrete (file, what is wrong, how to fix). English.`;
 
-// Gemini "yönetici" rolündeyken TDD testlerini bağımsız bir ajan oturumu inceler (aynı sözleşme, JSON şemasıyla).
+// Yönetici rolü "manager" iken TDD testlerini bağımsız bir ajan oturumu inceler (aynı sözleşme, JSON şemasıyla).
 const TEST_REVIEW_JSON_SCHEMA = toJsonSchema(TEST_REVIEW_SCHEMA);
 
 function testReviewAgentPrompt({ job, task, files }) {
@@ -201,7 +201,7 @@ ${WORK_RULES}`;
 }
 
 // ---------- Görev öncesi teknik brif ----------
-// Brifin bölümleri (Gemini ve ajan brifi aynı biçimi kullanır).
+// Brifin bölümleri (yönetici ve ajan brifi aynı biçimi kullanır).
 const BRIEF_SECTIONS = `1. **Builds on** — existing files/modules/components/types to reuse (exact paths) and conventions to follow.
 2. **Changes** — every file to create or modify (path → purpose), with the key functions/classes/components and their signatures, and the data contracts/types involved. Prefer extending shared packages over duplicating.
 3. **Data & migrations** — schema changes, migrations, seed updates (if any).
@@ -308,7 +308,7 @@ Given the current memory, the task that was just worked on, the agent's summary,
 
 "lessons": the FULL updated list (at most 15) of project-specific engineering RULES distilled from the verified defects listed below and in the current lessons — each a short imperative rule that would have prevented a whole class of defect in THIS codebase, naming the module that owns the mechanism (e.g. "Every investigation status change goes through PipelineStore.transition(); terminal states (COMPLETED/FAILED) are never overwritten and every catch block ends in one."). Generalize: when two defects share a cause, write one rule. Keep earlier lessons that still apply; never write generic advice ("write tests", "handle errors"). Empty if no defect has been verified yet.`;
 
-// Hafızayı ajanın güncellediği durumda (Gemini "yönetici" rolündeyken) aynı sözleşme JSON şemasıyla istenir.
+// Hafızayı ajanın güncellediği durumda (yönetici rolü "manager" iken) aynı sözleşme JSON şemasıyla istenir.
 const MEMORY_JSON_SCHEMA = toJsonSchema(MEMORY_SCHEMA);
 
 function memoryAgentPrompt({ job, task, diff }) {

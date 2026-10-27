@@ -9,8 +9,8 @@ const { SEVERE, clampScore, PANEL_LABELS } = require('./shared');
 class Review {
   // Güvenlik denetimi: ayrı bir uzman gözüyle diff; kritik/yüksek bulgular düzeltme turu başlatır.
   async securityAudit(diff, scopeLabel, depAudit = null) {
-    if (!settings.get().securityReview || !diff?.diff) return [];
-    this.log('gemini', 'info', `Güvenlik denetimi (${scopeLabel}): OWASP, yetki/IDOR, oturum, dosya yükleme, gizli anahtarlar…`);
+    if (!this.cfg().securityReview || !diff?.diff) return [];
+    this.log('manager', 'info', `Güvenlik denetimi (${scopeLabel}): OWASP, yetki/IDOR, oturum, dosya yükleme, gizli anahtarlar…`);
     try {
       const r = await this.gem({
         system: P.SECURITY_SYSTEM,
@@ -20,13 +20,13 @@ class Review {
       });
       const findings = (r?.findings || []).filter((f) => f?.title);
       const count = (sev) => findings.filter((f) => f.severity === sev).length;
-      this.log('gemini', findings.some((f) => ['critical', 'high'].includes(f.severity)) ? 'warn' : 'ok',
+      this.log('manager', findings.some((f) => ['critical', 'high'].includes(f.severity)) ? 'warn' : 'ok',
         `Güvenlik denetimi: ${findings.length ? `${count('critical')} kritik, ${count('high')} yüksek, ${count('medium')} orta, ${count('low')} düşük bulgu` : 'bulgu yok'}`);
-      for (const f of findings.slice(0, 8)) this.log('gemini', ['critical', 'high'].includes(f.severity) ? 'warn' : 'dim', `[${f.severity}] ${f.title}${f.file ? ` (${f.file})` : ''}`);
+      for (const f of findings.slice(0, 8)) this.log('manager', ['critical', 'high'].includes(f.severity) ? 'warn' : 'dim', `[${f.severity}] ${f.title}${f.file ? ` (${f.file})` : ''}`);
       return findings;
     } catch (e) {
       this.checkAbort();
-      this.log('gemini', 'warn', `Güvenlik denetimi yapılamadı: ${e.message}`);
+      this.log('manager', 'warn', `Güvenlik denetimi yapılamadı: ${e.message}`);
       return [];
     }
   }
@@ -73,7 +73,7 @@ class Review {
 
   /**
    * Salt okunur inceleme oturumu: yapılandırılmış sonuç ya da metinden ayrıştırılmış JSON (`convert`: şemaya uymayan
-   * yanıt Gemini'yle şemaya dönüştürülür, bkz. structuredFrom). Sonuç alınamazsa (`valid` geçmezse) uyarı yazıp null
+   * yanıt yöneticiyle şemaya dönüştürülür, bkz. structuredFrom). Sonuç alınamazsa (`valid` geçmezse) uyarı yazıp null
    * döner. İptal ve oturum (giriş) hataları yukarı taşınır: iş giriş olmadan süremez, arayüz "Giriş yap" düğmesini
    * gösterir. Bütün inceleme oturumları (derin inceleme, uzmanlar, doğrulayıcı, denetim) bu yoldan geçer.
    */
@@ -86,7 +86,7 @@ class Review {
         label,
         src: 'review',
         timeoutMin,
-        effort: effort === undefined ? settings.get().reviewEffort || undefined : effort,
+        effort: effort === undefined ? this.cfg().reviewEffort || undefined : effort,
         model,
         quiet,
       });
@@ -166,7 +166,7 @@ class Review {
     const text = `${task.title} ${task.goal} ${task.details} ${(task.acceptance || []).join(' ')}`.toLowerCase();
     const risky = /(ödeme|payment|stripe|iyzico|para|money|fiyat|price|stok|stock|sipariş|order|yetki|auth|role|rol|izin|permission|admin|webhook|callback|kuyruk|queue|zamanlay|cron|schedule|tick|retry|tekrar|idempot|transaction|transaksiyon|eşzaman|concurren|lock|kilit|state machine|durum|status|limit|kota|quota|sayaç|counter|dnc|tenant|kiracı)/.test(text);
     const first = !job.kind && job.tasks.indexOf(task) === 0;
-    const withQuality = job.kind === 'refactor' || job.kind === 'feature' || first || risky || settings.get().reviewLevel === 'max';
+    const withQuality = job.kind === 'refactor' || job.kind === 'feature' || first || risky || this.cfg().reviewLevel === 'max';
     const keys = withQuality ? ['security', 'logic', 'quality'] : ['security', 'logic'];
     this.log('review', 'step', `Görev sonu uzman incelemesi (${agents.ADAPTERS[rid].label}): ${keys.map((k) => P.SPECIALISTS[k].label).join(' · ')}${job.kind ? '' : risky ? ' — görev riskli alanlara dokunuyor' : ''}`);
     return this.runSpecialists(keys, (key) => P.taskSpecialistPrompt({ job, task, key, changedFiles, lang }), { rid, timeoutMin: 8 });
@@ -221,7 +221,7 @@ class Review {
     return [...issues, ...missing, ...failed];
   }
 
-  // Claude'un engelleyici bulgularını Gemini incelemesine katar; gereksinim kararlarında Claude'u esas alır.
+  // Claude'un engelleyici bulgularını yönetici incelemesine katar; gereksinim kararlarında Claude'u esas alır.
   mergeDeep(review, deep) {
     if (!deep) return review;
     const blocking = (deep.issues || []).filter((i) => i.blocking || ['critical', 'high'].includes(i.severity));
@@ -267,7 +267,7 @@ class Review {
     for (const id of review.requirementsPartial || []) if (valid.has(id) && job.reqStatus[id] !== 'met') job.reqStatus[id] = 'partial';
     for (const id of review.requirementsMet || []) if (valid.has(id)) job.reqStatus[id] = 'met';
     const met = Object.values(job.reqStatus).filter((v) => v === 'met').length;
-    if (checks.length || (review.requirementsMet || []).length) this.log(authoritative ? 'review' : 'gemini', 'dim', `Gereksinim kapsamı: ${met}/${valid.size} karşılandı`);
+    if (checks.length || (review.requirementsMet || []).length) this.log(authoritative ? 'review' : 'manager', 'dim', `Gereksinim kapsamı: ${met}/${valid.size} karşılandı`);
   }
 
   normalizeReview(review, checks, extra = {}) {
@@ -347,8 +347,8 @@ class Review {
     return r;
   }
 
-  // `src`: incelemeyi kimin yaptığı günlükte görünür ("gemini" ya da ajan incelemesi için "review").
-  logReview(review, label, src = 'gemini') {
+  // `src`: incelemeyi kimin yaptığı günlükte görünür ("manager" ya da ajan incelemesi için "review").
+  logReview(review, label, src = 'manager') {
     const score = review.qualityScore ? ` · kalite ${review.qualityScore}/10` : '';
     this.log(src, review.verdict === 'pass' ? 'ok' : 'warn', `${label}: ${review.verdict === 'pass' ? 'ONAYLANDI' : 'DÜZELTME GEREKLİ'}${score} — ${review.summary}`);
     for (const i of review.issues) this.log(src, 'warn', `• ${i}`);
@@ -362,7 +362,7 @@ class Review {
   }
 
   /**
-   * Görevin ilk incelemesi, bağımsız bir ajan oturumuyla (Gemini "yönetici" rolündeyken): kodu gezer, testleri kendisi
+   * Görevin ilk incelemesi, bağımsız bir ajan oturumuyla (yönetici rolü "manager" iken): kodu gezer, testleri kendisi
    * çalıştırır, değişikliği kırmayı dener. Dönen: REVIEW biçiminde nesne (+ testsRun) ya da sonuç alınamadıysa null.
    */
   async agentReview(task, { checks, changed, diff, tddNote, installed }) {
@@ -383,15 +383,15 @@ class Review {
     return out;
   }
 
-  // Ajan incelemesi sonuç vermediğinde: Gemini anahtarı varsa Gemini inceler; yoksa karar yalnızca kontrollere dayanır.
-  async reviewFallback(geminiReview, checks) {
-    if (settings.managerReady(settings.get())) {
-      this.log('gemini', 'info', 'İncelemeyi Gemini yapıyor (yedek)…');
+  // Ajan incelemesi sonuç vermediğinde: yönetici hazırsa o inceler; yoksa karar yalnızca kontrollere dayanır.
+  async reviewFallback(managerReview, checks) {
+    if (settings.managerReady(this.cfg())) {
+      this.log('manager', 'info', 'İncelemeyi yönetici yapıyor (yedek)…');
       try {
-        return await geminiReview();
+        return await managerReview();
       } catch (e) {
         this.checkAbort();
-        this.log('gemini', 'warn', `Gemini incelemesi de yapılamadı: ${e.message}`);
+        this.log('manager', 'warn', `Yönetici incelemesi de yapılamadı: ${e.message}`);
       }
     }
     const failed = (checks || []).some((c) => !c.ok && !c.env);

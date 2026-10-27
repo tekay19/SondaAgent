@@ -1,4 +1,4 @@
-// Anthropic Messages API istemcisi (REST + SSE akışı, SDK bağımlılığı yok). Gemini istemcisiyle aynı sözleşmeyi
+// Anthropic Messages API istemcisi (REST + SSE akışı, SDK bağımlılığı yok). Diğer yönetici istemcileriyle aynı sözleşmeyi
 // taşır (`generate` metin ya da ayrıştırılmış nesne döner), böylece "yönetici" adımları (ürün tanımı, plan onayı,
 // son kabul, rapor) hangisi seçilirse onunla çalışır. Kodlayan ve inceleyen Claude oturumları bunu KULLANMAZ:
 // onlar Claude CLI ve abonelikle çalışır; bu anahtar ajanların ortamına hiç geçmez.
@@ -39,7 +39,7 @@ const makeError = (message, status, extra) => new AnthropicError(`${message}${ST
 const STRUCTURED_REJECTED = /output_config\.format|output_format|json_schema|structured outputs?/i;
 
 // Yapılandırılmış çıktı şeması: her nesnede `additionalProperties: false` zorunlu; sayı/dizge kısıtları, varsayılan ve
-// Gemini'ye özgü alanlar desteklenmez (bkz. Claude API belgesi, Structured Outputs → JSON Schema Limitations).
+// sağlayıcıya özgü alanlar desteklenmez (bkz. Claude API belgesi, Structured Outputs → JSON Schema Limitations).
 const DROP_KEYS = new Set(['minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'multipleOf', 'minLength', 'maxLength', 'minItems', 'maxItems', 'uniqueItems', 'pattern', 'default', 'nullable', 'propertyOrdering', 'examples']);
 function strictSchema(node) {
   if (Array.isArray(node)) return node.map(strictSchema);
@@ -58,7 +58,7 @@ function strictSchema(node) {
 const STREAM_ERROR_STATUS = { overloaded_error: 529, rate_limit_error: 429, api_error: 500, timeout_error: 504 };
 
 /**
- * Gemini biçimindeki parçaları ([{ text }], [{ inlineData }]) Messages API içerik bloklarına çevirir. PDF `document`
+ * İstem parçalarını ([{ text }], [{ inlineData }]) Messages API içerik bloklarına çevirir. PDF `document`
  * bloğu olur; sağlayıcı sınırını aşan ya da desteklenmeyen ek yerine kısa bir not konur (istek 400 ile düşmesin,
  * yönetici eksikliği bilsin).
  */
@@ -90,7 +90,7 @@ function contentOf(parts) {
 
 /**
  * Claude'a istek atar. `schema` (standart JSON Schema, üst düzey nesne) verilirse ayrıştırılmış nesne döner; verilmezse
- * metin döner. parts: [{ text }] veya [{ inlineData: { mimeType, data } }] (Gemini ile aynı biçim).
+ * metin döner. parts: [{ text }] veya [{ inlineData: { mimeType, data } }] (tüm yönetici istemcilerinde aynı biçim).
  * onProgress(karakterSayısı) uzun yanıtlarda ilerleme bildirir. onUsage({ totalTokenCount, inputTokens, outputTokens }).
  * Yalnızca bitiş nedeni gelen yanıt kullanılır: bitmeden kapanan akış yarım sayılır ve yeniden denenir.
  */

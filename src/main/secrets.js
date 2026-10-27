@@ -1,6 +1,6 @@
 // Proje başına ortam değişkenleri (.env değerleri). Değerler işletim sisteminin anahtar zinciriyle
 // (macOS Keychain / Windows DPAPI) şifrelenip userData/secrets.json'da saklanır.
-// Arayüze ham değer gönderilmez (yalnızca maskeli hali); ajan istemlerine ve Gemini'ye yalnızca adlar gider.
+// Arayüze ham değer gönderilmez (yalnızca maskeli hali); ajan istemlerine ve yöneticiye yalnızca adlar gider.
 // Değerleri projenin .env dosyasına Sonda yazar.
 const { app, safeStorage } = require('electron');
 const fs = require('fs');
@@ -154,7 +154,7 @@ function presentNames(dir) {
   return [...names].sort();
 }
 
-// Adlar ve eksikler (değer yok): ajan istemleri ve Gemini için.
+// Adlar ve eksikler (değer yok): ajan istemleri ve yönetici için.
 function summary(dir) {
   const vars = get(dir);
   const ex = example(dir);

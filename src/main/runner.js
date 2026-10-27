@@ -73,10 +73,11 @@ const live = new Set();
  * Bir süreci başlatır. Dönen nesne: { child, done: Promise<result>, kill() }
  * - command + args: doğrudan çalıştırma (cross-spawn)
  * - shellCommand: kabuk üzerinden çalıştırma (npm run build gibi)
+ * - firstOutputMs: bu süre içinde hiç çıktı gelmezse süreç takılmış sayılır ve kapatılır (sonuçta noOutput: true)
  * - exitGraceMs: ana süreç çıktıktan sonra, çıktı borularını tutan arka plan süreçleri (`cmd &`) için bekleme; sonra
  *   süreç grubu kapatılır. Aksi halde arka planda kalan bir dev sunucusu beklemeyi sonsuza uzatırdı.
  */
-function start({ command, args = [], shellCommand, cwd, env, input, onStdout, onStderr, timeoutMs, signal, tailSize = 8000, exitGraceMs = 10000 }) {
+function start({ command, args = [], shellCommand, cwd, env, input, onStdout, onStderr, timeoutMs, firstOutputMs, signal, tailSize = 8000, exitGraceMs = 10000 }) {
   const opts = { cwd, env, windowsHide: true, detached: !IS_WIN };
   const child = shellCommand
     ? spawn(shellCommand, { ...opts, shell: true })
@@ -84,13 +85,16 @@ function start({ command, args = [], shellCommand, cwd, env, input, onStdout, on
 
   const outTail = new Tail(tailSize);
   const errTail = new Tail(tailSize);
+  let sawOutput = false;
   const out = lineSplitter((l) => {
     const line = stripAnsi(l);
+    sawOutput = true;
     outTail.add(line);
     onStdout?.(line);
   });
   const err = lineSplitter((l) => {
     const line = stripAnsi(l);
+    sawOutput = true;
     errTail.add(line);
     onStderr?.(line);
   });
@@ -153,6 +157,17 @@ function start({ command, args = [], shellCommand, cwd, env, input, onStdout, on
       kill();
     });
   }
+  // İlk çıktı bekçisi: bu süre içinde tek bir satır bile gelmediyse süreç (ya da arkasındaki model sağlayıcısı)
+  // takılmıştır; tam zaman aşımını (saatler olabilir) beklemeden kapatılır. Ajanlar ilk olayı saniyeler içinde yazar.
+  let noOutput = false;
+  if (firstOutputMs) {
+    later(firstOutputMs, () => {
+      if (sawOutput || closed) return;
+      noOutput = true;
+      timedOut = true;
+      kill();
+    });
+  }
   const onAbort = () => kill();
   signal?.addEventListener('abort', onAbort, { once: true });
   if (signal?.aborted) kill();
@@ -185,6 +200,7 @@ function start({ command, args = [], shellCommand, cwd, env, input, onStdout, on
         code: spawnError ? -1 : code,
         signal: sig,
         timedOut,
+        noOutput,
         killed,
         error: spawnError ? spawnError.message : null,
         stdout: outTail.get(),

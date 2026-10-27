@@ -1,4 +1,4 @@
-// Ekli teknik dokümanlar ve tasarım dosyaları: Gemini'ye gönderilecek parçalara dönüştürme ve
+// Ekli teknik dokümanlar ve tasarım dosyaları: yöneticiye gönderilecek parçalara dönüştürme ve
 // ajanların okuyabilmesi için proje klasörüne kopyalama.
 // İki rol vardır: "doc" (şartname, PRD, API dokümanı…) ve "design" (arayüzün görünümünü BELİRLEYEN
 // HTML/CSS, görsel, klasör halinde tasarım…). Tasarım dosyaları docs/sonda/design/ altına kopyalanır.
@@ -15,7 +15,7 @@ const INLINE_MIME = {
   '.gif': 'image/gif',
 };
 const MAX_FILE = 15 * 1024 * 1024;
-const MAX_TOTAL = 19 * 1024 * 1024; // Gemini satır içi istek sınırı ~20 MB
+const MAX_TOTAL = 19 * 1024 * 1024; // yönetici isteği için satır içi ek sınırı ~20 MB
 const DOC_DIR = path.join('docs', 'sonda');
 const DOC_POSIX = 'docs/sonda';
 const DESIGN_DIR = 'design'; // docs/sonda/design/ — tasarım dosyaları; _onizleme/ altında Sonda'nın aldığı görüntüler
@@ -119,7 +119,7 @@ function sanitizeAttachments(list) {
 
 const isDesign = (a) => a?.role === 'design' || a?.kind === 'folder' || a?.kind === 'asset';
 
-// Tasarım klasöründe Gemini'ye metin olarak verilecek dosyalar: önce sayfalar, sonra stiller, sonra betikler.
+// Tasarım klasöründe yöneticiye metin olarak verilecek dosyalar: önce sayfalar, sonra stiller, sonra betikler.
 function designTextFiles(folder) {
   const { files } = walkFolder(folder);
   const rank = (r) => (/\.html?$/i.test(r) ? 0 : /\.(css|scss|sass|less)$/i.test(r) ? 1 : /\.svg$/i.test(r) ? 3 : 2);
@@ -129,10 +129,10 @@ function designTextFiles(folder) {
 }
 
 /**
- * Ekleri Gemini parçalarına çevirir. Dokümanlar metin / satır içi (PDF, görsel) olarak; tasarım dosyalarında
+ * Ekleri yönetici istem parçalarına çevirir. Dokümanlar metin / satır içi (PDF, görsel) olarak; tasarım dosyalarında
  * sayfa ve stil kaynakları metin olarak (bütçeli), görseller satır içi; klasörlerde kalan dosyalar adıyla listelenir.
  */
-async function toGeminiParts(attachments) {
+async function toManagerParts(attachments) {
   const parts = [];
   let total = 0;
   let designText = 0;
@@ -247,7 +247,7 @@ function previewDir(projectDir) {
   return path.join(projectDir, DOC_DIR, DESIGN_DIR, PREVIEW_DIR);
 }
 
-// Orijinal dokümanları (docs/sonda/references), tasarım dosyalarını (docs/sonda/design) ve Gemini'nin
+// Orijinal dokümanları (docs/sonda/references), tasarım dosyalarını (docs/sonda/design) ve yöneticinin
 // şartnamesini projeye yazar; ajanlar buradan okur.
 function writeToProject(projectDir, attachments, specMarkdown) {
   const base = path.join(projectDir, DOC_DIR);
@@ -369,4 +369,4 @@ function readSondaContext(projectDir) {
   return parts.join('\n\n');
 }
 
-module.exports = { FILTERS, DESIGN_FILTERS, inspect, sanitizeAttachments, isDesign, isDesignFile, toGeminiParts, writeDesign, previewDir, writeToProject, writeRequest, readMemory, writeMemory, appendProgress, writeAgentGuides, readSondaContext };
+module.exports = { FILTERS, DESIGN_FILTERS, inspect, sanitizeAttachments, isDesign, isDesignFile, toManagerParts, writeDesign, previewDir, writeToProject, writeRequest, readMemory, writeMemory, appendProgress, writeAgentGuides, readSondaContext };

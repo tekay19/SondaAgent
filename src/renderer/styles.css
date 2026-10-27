@@ -52,7 +52,7 @@
   --focus: rgba(15, 139, 141, 0.2);
   --link: #1d5fa8;
   /* Her renk tek anlam taşır: yeşil = tamam, turkuaz = çalışıyor / birincil, safran = uyarı,
-     nar = hata; kaynaklar: kobalt = Gemini, sumak moru = Claude, ceviz = denetçi. */
+     nar = hata; kaynaklar: kobalt = yönetici, sumak moru = Claude, ceviz = denetçi. */
   --ok: #3f7a3a;
   --ok-text: #356a31;
   --ok-soft: rgba(63, 122, 58, 0.1);
@@ -65,8 +65,8 @@
   --err: #c0392f;
   --err-text: #a52f26;
   --err-soft: rgba(192, 57, 47, 0.08);
-  --gemini: #23408e;
-  --gemini-soft: rgba(35, 64, 142, 0.07);
+  --manager: #23408e;
+  --manager-soft: rgba(35, 64, 142, 0.07);
   --agent: #7a3b69;
   --test: #0b7577;
   --review: #7a5230;
@@ -136,8 +136,8 @@
     --err: #e0675d;
     --err-text: #f2a39c;
     --err-soft: rgba(224, 103, 93, 0.12);
-    --gemini: #8fa9ea;
-    --gemini-soft: rgba(143, 169, 234, 0.1);
+    --manager: #8fa9ea;
+    --manager-soft: rgba(143, 169, 234, 0.1);
     --agent: #d6a0cb;
     --test: #4cc3bf;
     --review: #d4a979;
@@ -264,7 +264,7 @@ body:not(.darwin) .app.side-collapsed .job-header { padding-left: 60px; }
 .h-kind { font-weight: 600; font-size: 11.5px; color: var(--muted); }
 .h-kind.kind-bugfix { color: var(--err-text); }
 .h-kind.kind-feature { color: var(--accent-text); }
-.h-kind.kind-refactor { color: var(--gemini); }
+.h-kind.kind-refactor { color: var(--manager); }
 
 /* Durum noktaları kilim baklavası biçiminde. */
 .dot { width: 7px; height: 7px; border-radius: 1.5px; transform: rotate(45deg); background: var(--faint); flex: none; opacity: 0.8; }
@@ -359,7 +359,7 @@ body:not(.darwin) .app.side-collapsed .job-header { padding-left: 60px; }
 .readiness { display: flex; flex-direction: column; margin-bottom: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); overflow: hidden; }
 .ready-item { display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 12px; font-size: 12.5px; color: var(--text-2); border-top: 1px solid var(--line); min-height: 40px; }
 .ready-item:first-child { border-top: 0; }
-.ready-item > .ico { color: var(--gemini); }
+.ready-item > .ico { color: var(--manager); }
 .ready-item.warn > .ico { color: var(--warn); }
 .ready-item.warn { background: var(--warn-soft); }
 .ready-item > span { flex: 1; min-width: 0; }
@@ -395,6 +395,12 @@ body:not(.darwin) .app.side-collapsed .job-header { padding-left: 60px; }
 .att.design > .ico { color: var(--accent-text); }
 .tag.design { color: var(--accent-text); border-color: rgba(15, 139, 141, 0.35); }
 .composer-bar { display: flex; align-items: center; gap: 6px; padding: 9px 10px 10px; flex-wrap: wrap; border-top: 1px solid var(--line); }
+/* Kadro satırı: üç küçük seçici (yönetici / kodlayıcı / inceleyici) ve kısa bir not. */
+.stack-bar { display: flex; align-items: center; gap: 10px; padding: 7px 10px 9px; flex-wrap: wrap; border-top: 1px dashed var(--line); font-size: 12px; color: var(--muted); }
+.stack-bar .stack-title { font-weight: 600; color: var(--text-2); }
+.stack-bar label { display: inline-flex; align-items: center; gap: 5px; }
+.stack-bar select { font-size: 12px; padding: 3px 6px; max-width: 170px; }
+.stack-bar .hint { flex: 1 1 100%; }
 .composer-bar .folder { max-width: 220px; }
 .composer-bar .folder span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .spacer { flex: 1; }
@@ -492,7 +498,7 @@ details.fold > :not(summary) { margin-top: 6px; }
 .details-group { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 6px; }
 .details-group > .fold { margin-bottom: 2px; }
 .req { font-size: 12.5px; color: var(--text-2); padding: 2px 0; display: grid; grid-template-columns: 16px 42px 1fr; gap: 2px; }
-.req b { color: var(--gemini); font-family: var(--mono); font-weight: 500; font-size: 11.5px; }
+.req b { color: var(--manager); font-family: var(--mono); font-weight: 500; font-size: 11.5px; }
 .rq { color: var(--faint); font-size: 12px; }
 .rq.met { color: var(--ok); }
 .rq.partial { color: var(--warn); }
@@ -501,14 +507,14 @@ details.fold > :not(summary) { margin-top: 6px; }
 .req-bar i { display: block; background: var(--ok); }
 .req-bar em { display: block; background: var(--warn); opacity: 0.75; }
 
-.questions { border: 1px solid rgba(35, 64, 142, 0.25); background: var(--gemini-soft); border-radius: var(--radius-sm); padding: 12px; }
+.questions { border: 1px solid rgba(35, 64, 142, 0.25); background: var(--manager-soft); border-radius: var(--radius-sm); padding: 12px; }
 .question { margin-bottom: 10px; }
 .question label { display: block; font-size: 13px; margin-bottom: 4px; }
 .question input { width: 100%; }
 
 .phase-block { margin-bottom: 12px; }
 .phase-head { display: flex; align-items: center; gap: 9px; margin: 2px 0 7px; font-size: 12.5px; color: var(--text-2); font-weight: 600; }
-.phase-no { width: 20px; height: 20px; border-radius: 6px; background: var(--gemini-soft); color: var(--gemini); display: inline-flex; align-items: center; justify-content: center; font-size: 11px; flex: none; font-weight: 700; }
+.phase-no { width: 20px; height: 20px; border-radius: 6px; background: var(--manager-soft); color: var(--manager); display: inline-flex; align-items: center; justify-content: center; font-size: 11px; flex: none; font-weight: 700; }
 .phase-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tasks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
 .task { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel-2); transition: border-color 0.15s; }
@@ -546,7 +552,7 @@ details.fold > :not(summary) { margin-top: 6px; }
 .task.open .task-body { display: block; }
 .task-body h5 { margin: 10px 0 4px; font-size: 10.5px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: 0.08em; }
 .task-body pre, .pre { white-space: pre-wrap; font-family: var(--sans); margin: 0; color: var(--text-2); }
-.review-box { border-left: 2px solid var(--gemini); padding: 6px 10px; background: var(--gemini-soft); border-radius: 0 8px 8px 0; color: var(--text-2); font-size: 12.5px; }
+.review-box { border-left: 2px solid var(--manager); padding: 6px 10px; background: var(--manager-soft); border-radius: 0 8px 8px 0; color: var(--text-2); font-size: 12.5px; }
 
 #planActions { flex: none; }
 .approve-box, .note-box { border-top: 1px solid var(--line); padding: 12px 16px 14px; background: var(--panel); max-height: 55vh; overflow: auto; }
@@ -590,7 +596,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); box-sha
 .log .t { color: var(--faint); font-size: 11px; padding-top: 1px; }
 .log .src { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; padding-top: 1px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .log .src.agent { color: var(--agent); }
-.log .src.gemini { color: var(--gemini); }
+.log .src.manager { color: var(--manager); }
 .log .src.test { color: var(--test); }
 .log .src.system { color: var(--muted); }
 .log .src.review { color: var(--review); }
@@ -678,6 +684,7 @@ legend { font-family: var(--display); font-weight: 700; font-size: 14px; margin-
 .check { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; color: var(--text-2); cursor: pointer; }
 .check input { margin-top: 3px; accent-color: var(--accent); flex: none; }
 .check small { display: block; }
+.check.disabled { opacity: 0.45; cursor: not-allowed; }
 .hint { color: var(--faint); font-size: 12px; }
 .warn-hint { color: var(--warn-text); display: block; margin-top: 12px; }
 #standardsInput { width: 100%; font-family: var(--mono); font-size: 12px; line-height: 1.5; }
@@ -795,7 +802,7 @@ details.finding > summary b { font-weight: 600; }
 .f-files { margin: 2px 0 6px 16px; display: flex; flex-wrap: wrap; gap: 4px; }
 .f-files code { font-size: 11px; background: var(--code-bg); padding: 0 5px; border-radius: 4px; color: var(--muted); }
 .badge.kind-bugfix { color: var(--err-text); border-color: rgba(192, 57, 47, 0.35); background: var(--err-soft); }
-.badge.kind-refactor { color: var(--gemini); border-color: rgba(35, 64, 142, 0.3); background: var(--gemini-soft); }
+.badge.kind-refactor { color: var(--manager); border-color: rgba(35, 64, 142, 0.3); background: var(--manager-soft); }
 .badge.kind-feature { color: var(--accent-text); border-color: rgba(15, 139, 141, 0.35); background: var(--accent-soft); }
 .bug-card.kind-feature .bug-no { background: var(--accent-soft); color: var(--accent-text); }
 
@@ -898,3 +905,47 @@ details.finding > summary b { font-weight: 600; }
 h1, h2, h3 { text-wrap: balance; }
 p, .summary-text, .hint { text-wrap: pretty; }
 .sec-title { letter-spacing: 0.12em; }
+
+/* ---------- Ayarlar penceresi: roller, bağlantılar, gelişmiş katlamalar ---------- */
+.dialog.settings { width: min(820px, 94vw); }
+.dialog.settings .dialog-head { align-items: flex-start; }
+.dialog.settings .dialog-sub { max-width: 640px; white-space: normal; line-height: 1.45; margin-top: 4px; }
+.pane-intro { margin: 16px 0 4px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.pane-intro b { color: var(--text); font-weight: 600; }
+.role-card { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-2); padding: 14px 16px 14px; margin-top: 14px; display: flex; flex-direction: column; gap: 12px; }
+.role-head { display: flex; gap: 12px; align-items: flex-start; }
+.role-head b { font-family: var(--display); font-size: 14.5px; color: var(--heading); display: block; }
+.role-head small { display: block; color: var(--muted); font-size: 12.5px; line-height: 1.45; margin-top: 2px; }
+.role-no { flex: none; width: 24px; height: 24px; border-radius: 7px; background: var(--manager-soft); color: var(--manager); font-family: var(--display); font-weight: 700; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; margin-top: 1px; }
+.role-models { border-top: 1px dashed var(--line-2); padding-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.role-models-head { font-size: 12.5px; font-weight: 600; color: var(--text-2); display: flex; gap: 8px; align-items: baseline; }
+.role-models-head small { font-weight: 400; color: var(--faint); }
+legend .legend-sub { font-family: var(--font); font-weight: 400; font-size: 12px; color: var(--faint); margin-left: 8px; }
+.row.actions { flex-wrap: wrap; row-gap: 6px; }
+.row.actions .hint { flex: 1 1 200px; min-width: 0; }
+/* Bağlantı kartındaki satır içi model seçici ("Modelleri getir"den sonra liste burada da görünür). */
+.field.inline { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; }
+.field.inline select { width: auto; max-width: 260px; font-size: 12px; padding: 4px 6px; }
+details.adv { margin-top: 2px; }
+details.adv > summary { font-size: 12.5px; }
+details.adv > :not(summary) { margin-top: 10px; }
+details.adv .warn-hint { margin-top: 6px; }
+.checks { gap: 6px 18px; }
+.checks .check { align-items: center; }
+.checks .check input { margin-top: 0; }
+.agent-card .conn-state { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.dialog-foot .hint { max-width: 50%; }
+/* Basılınca düğme tepki verir; geçişler yalnızca dönüştürme ve renk (Emil Kowalski kuralı). */
+.btn { transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s, transform 0.16s cubic-bezier(0.23, 1, 0.32, 1); }
+.btn:active:not(:disabled) { transform: scale(0.97); }
+.dtab { transition: color 0.15s, border-color 0.15s; }
+@media (prefers-reduced-motion: reduce) {
+  .btn:active:not(:disabled) { transform: none; }
+}
+@media (max-width: 640px) {
+  .dialog.settings .grid2, .dialog.settings .grid3 { grid-template-columns: 1fr; }
+}
+
+/* Modeller: hazır kurulum düğmeleri ve uyumluluk uyarıları */
+.preset-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+.models-warn { display: flex; flex-direction: column; gap: 6px; margin: 0 0 14px; padding: 10px 12px; border: 1px solid var(--warn); background: var(--warn-soft); color: var(--warn-text); border-radius: 10px; font-size: 13px; line-height: 1.4; }

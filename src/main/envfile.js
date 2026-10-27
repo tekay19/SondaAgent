@@ -370,7 +370,7 @@ function variantsOf(value) {
   return [...out].filter((v) => v.length >= 6);
 }
 
-// Gizli değerleri metinden ayıklar (Gemini'ye giden metin, loglar).
+// Gizli değerleri metinden ayıklar (yöneticiye giden metin, loglar).
 function makeRedactor(vars) {
   const pairs = Object.entries(vars || {})
     .filter(([k, v]) => isSensitive(k, v))

@@ -13,13 +13,14 @@ const { cleanText, guessLang } = require('./shared');
 
 class Maintenance {
   // ---------- bakım: bitmiş / mevcut projede hata düzeltme ve refactor ----------
-  startMaintenance({ kind, text, bugs, items, projectDir, agent, attachments }) {
+  // `stack`: bu işin kadrosu (bkz. planning.startPlanning); verilmezse projenin işinden devralınır ya da Ayarlar'dan.
+  startMaintenance({ kind, text, bugs, items, projectDir, agent, stack, attachments }) {
     if (this.running) throw new Error('Şu anda çalışan bir iş var. Önce durdurun.');
     if (!['bugfix', 'refactor', 'feature'].includes(kind)) throw new Error('Geçersiz iş türü.');
     if (!projectDir || !fs.existsSync(projectDir) || project.isEmptyDir(projectDir)) throw new Error('Bu klasörde üzerinde çalışılacak bir proje yok.');
-    const s = settings.get();
+    const s = settings.withStack(settings.get(), { ...settings.cleanStack(stack), ...(agents.ADAPTERS[agent] ? { agent } : {}) });
     if (!settings.managerReady(s)) throw new Error(settings.managerMissingMessage(s));
-    const agentId = agents.ADAPTERS[agent] ? agent : s.defaultAgent;
+    const agentId = s.defaultAgent;
     if (!agents.resolveBin(agentId, s)) throw new Error(`${agents.ADAPTERS[agentId].label} bulunamadı. Kurulum: ${agents.ADAPTERS[agentId].install}`);
     const list = (items || bugs || []).map((b) => String(b || '').trim()).filter(Boolean);
     const free = String(text || '').trim();
@@ -34,12 +35,13 @@ class Maintenance {
       idea: request || 'Kod sağlığı taraması ve refactor',
       projectDir,
       agent: agentId,
+      stack: settings.resolveStack(s),
       attachments: docs.sanitizeAttachments(attachments),
       createdAt: Date.now(),
       phase: 'planning',
       plan: null,
       tasks: [],
-      stats: { agentRuns: 0, costUsd: 0, geminiTokens: 0 },
+      stats: { agentRuns: 0, costUsd: 0, managerTokens: 0 },
       suggestions: [],
       userNotes: [],
       shots: [],
@@ -50,7 +52,8 @@ class Maintenance {
       report: null,
       error: null,
     };
-    settings.save({ lastProjectDir: projectDir, defaultAgent: agentId });
+    settings.save({ lastProjectDir: projectDir });
+    settings.rememberProjectStack(projectDir, this.job.stack);
     this.created();
     this.guarded(() => this.planMaintenance());
     return this.job.id;
@@ -60,7 +63,7 @@ class Maintenance {
   // Önceki Sonda planı varsa gereksinimleri ve şartnamesi devralınır (kabul edilmiş davranış korunur).
   async planMaintenance(feedback) {
     const job = this.job;
-    const s = settings.get();
+    const s = this.cfg();
     const dir = job.projectDir;
     const bug = job.kind === 'bugfix';
     const feat = job.kind === 'feature';

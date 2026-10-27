@@ -1,5 +1,5 @@
-// Ortak LLM istemci çekirdeği: SSE akışı, zaman aşımı, iptal, yeniden deneme ve JSON ayrıştırma. Gemini ve Claude
-// istemcileri yalnızca isteğin biçimini, olayların okunmasını ve bitiş kurallarını sağlar (bkz. gemini.js, anthropic.js).
+// Ortak LLM istemci çekirdeği: SSE akışı, zaman aşımı, iptal, yeniden deneme ve JSON ayrıştırma. Claude API ve yerel model
+// istemcileri yalnızca isteğin biçimini, olayların okunmasını ve bitiş kurallarını sağlar (bkz. anthropic.js, localllm.js).
 const https = require('https');
 const http = require('http');
 

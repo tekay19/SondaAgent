@@ -12,6 +12,9 @@ const envMissingNames = (output) => [...new Set([...String(output || '').matchAl
 
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Kabuğun "komut yok" iletisi (cmd.exe, PowerShell, sh/bash/zsh): hata vermesi beklenen komutta beklenen hata değildir.
+const NOT_FOUND = /is not recognized as an internal or external command|is not recognized as the name of a cmdlet|command not found|: not found\b|No such file or directory/i;
+
 // pnpm/yarn/bun kurulu değilse corepack ya da npx üzerinden çalıştır.
 function pmBin(pm) {
   if (pm === 'npm' || findExecutable(pm)) return pm;
@@ -102,14 +105,16 @@ async function runChecks({ dir, extraCommands, setupCommands, full = false, log,
       if (l.trim() && lines++ < 400) log({ lvl: 'dim', text: l });
     };
     const r = await runner.run({ shellCommand: c.cmd, cwd: c.cwd, env: verifyEnv(), timeoutMs: c.timeoutMs || CHECK_TIMEOUT, signal, tailSize: 6000, onStdout: onLine, onStderr: onLine });
+    const output = ((r.stdout || '') + '\n' + (r.stderr || '')).trim().slice(-6000);
     // Hata vermesi beklenen komut: normal biçimde sıfır dışı bir kodla bitmeli (zaman aşımı, başlatılamama
-    // ya da "komut bulunamadı" (126/127) beklenen hata sayılmaz).
-    const failedProperly = !r.timedOut && r.code != null && r.code > 0 && r.code !== 126 && r.code !== 127;
+    // ya da "komut bulunamadı" beklenen hata sayılmaz). Kabuklar bunu farklı bildirir: sh 126/127 ile, cmd.exe
+    // ise çıkış 1 ve "is not recognized" iletisiyle.
+    const notFound = r.code === 126 || r.code === 127 || r.code === 9009 || NOT_FOUND.test(output);
+    const failedProperly = !r.timedOut && r.code != null && r.code > 0 && !notFound;
     const ok = c.expectFail ? failedProperly : r.code === 0 && !r.timedOut;
     const secs = Math.round((Date.now() - started) / 1000);
-    const why = r.timedOut ? ' · zaman aşımı' : ok ? '' : c.expectFail && r.code === 0 ? ' · hata vermesi gerekirken başarıyla bitti' : ` · çıkış ${r.code}`;
+    const why = r.timedOut ? ' · zaman aşımı' : ok ? '' : c.expectFail && r.code === 0 ? ' · hata vermesi gerekirken başarıyla bitti' : c.expectFail && notFound ? ' · komut bulunamadı (beklenen hata değil)' : ` · çıkış ${r.code}`;
     log({ lvl: ok ? 'ok' : 'error', text: `${ok ? '✓' : '✗'} ${c.name} · ${secs} sn${why}` });
-    const output = ((r.stdout || '') + '\n' + (r.stderr || '')).trim().slice(-6000);
     const missingEnv = !ok && !c.expectFail ? envMissingNames(output) : [];
     if (missingEnv.length) log({ lvl: 'warn', text: `Eksik ortam değişkeni: ${missingEnv.join(', ')} — "Anahtarlar"dan girin; bu kod hatası sayılmaz.` });
     results.push({ name: c.name, cmd: c.cmd, ok, code: r.code, timedOut: r.timedOut, ...(c.expectFail ? { expectFail: true } : {}), ...(missingEnv.length ? { env: true } : {}), output });

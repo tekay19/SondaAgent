@@ -33,7 +33,7 @@ Verification: ${(checks || []).map((c) => `${c.name}: ${c.env ? 'skipped (enviro
 Browser test: ${smoke?.pages ? smoke.pages.map((p) => `${p.route} ${p.viewport} HTTP ${p.status ?? '?'} errors ${p.errors.length}`).join('; ') : smoke?.error || smoke?.skipped || 'not run'}
 Final review: ${finalReview ? `${finalReview.verdict}, quality ${finalReview.qualityScore ?? '-'}/10 — ${finalReview.summary}; open issues: ${(finalReview.issues || []).join('; ') || 'none'}` : 'n/a'}
 Requirement coverage: ${reqStatusText(job)}
-Security findings (Gemini audit, last run): ${(finalReview?.security || []).map((f) => `[${f.severity}] ${f.title}`).join('; ') || 'none'}
+Security findings (manager audit, last run): ${(finalReview?.security || []).map((f) => `[${f.severity}] ${f.title}`).join('; ') || 'none'}
 Specialist review panel (security / business rules / architecture — findings verified in the code; blocking ones went to fix rounds, so list them as found-and-fixed unless they are still among the open issues):
 ${panelReportText(job, finalReview)}
 Phase gates: ${Object.entries(job.gates || {}).map(([k, g]) => `${k}: ${g.status}${g.review?.qualityScore ? ` (${g.review.qualityScore}/10)` : ''}`).join('; ') || 'n/a'}

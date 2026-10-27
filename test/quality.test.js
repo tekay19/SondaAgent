@@ -1,4 +1,4 @@
-// Kalite hattı testleri: bulgu defteri, yönetici (Gemini) bulgularının doğrulanması, görev tabanına göre
+// Kalite hattı testleri: bulgu defteri, yönetici bulgularının doğrulanması, görev tabanına göre
 // inceleme, düzeltme sonrası yeniden doğrulama, temiz klon denetimi, sayfa denetimleri ve sağlamlık kuralları.
 const test = require('node:test');
 const assert = require('node:assert');
@@ -48,7 +48,7 @@ test('Bulgu defteri: doğrulanmış bulgu kapanana kadar izlenir; aynı bulgu yi
 function orch(job = {}) {
   const { Orchestrator } = require('../src/main/orchestrator');
   const o = new Orchestrator({ emit: () => {} });
-  o.job = { id: 'mun446n8-kalite', idea: 'x', projectDir: tmp(), agent: 'claude', tasks: [], userNotes: [], suggestions: [], stats: { agentRuns: 0, costUsd: 0, geminiTokens: 0 }, plan: { requirements: [{ id: 'R1', text: 'a' }], language: 'Turkish', verify: {} }, ...job };
+  o.job = { id: 'mun446n8-kalite', idea: 'x', projectDir: tmp(), agent: 'claude', tasks: [], userNotes: [], suggestions: [], stats: { agentRuns: 0, costUsd: 0, managerTokens: 0 }, plan: { requirements: [{ id: 'R1', text: 'a' }], language: 'Turkish', verify: {} }, ...job };
   o.logs = [];
   o.log = (src, lvl, text) => o.logs.push(`${src}/${lvl}: ${text}`);
   return o;
@@ -177,7 +177,7 @@ test('Sayfa denetimleri: taşma, kırık görsel, başarısız istek kusurdur; e
   assert.doesNotThrow(() => new Function(`return ${PROBE_JS}`));
 });
 
-test('İstemler: sağlamlık plana baştan girer; Gemini önce kırmayı dener; dersler ve açık bulgular görevlere taşınır', () => {
+test('İstemler: sağlamlık plana baştan girer; yönetici önce kırmayı dener; dersler ve açık bulgular görevlere taşınır', () => {
   const P = require('../src/main/prompts');
   // Sağlamlık temeli: planlayıcı, kodlayan ajan ve uzmanlar aynı metni kullanır.
   assert.match(P.ROBUSTNESS_BASELINE, /EVERY failure path .* ends in a terminal state the user can see/);
@@ -237,7 +237,7 @@ test('İstemler: sağlamlık plana baştan girer; Gemini önce kırmayı dener; 
   assert.ok(P.MEMORY_SCHEMA.required.includes('lessons'));
   assert.match(P.memoryUserText({ job, task, diff: null }), /# Defects verified by independent reviewers[\s\S]*\[open\/medium\] Hata kaydı/);
   assert.match(P.briefUserText({ job, task, fileTree: '', keyFiles: '' }), /# Lessons \(rules distilled[\s\S]*# Verified open defects/);
-  // Bakım işinde brif yazarı (ajan ya da Gemini) isteği, analizi ve bulguları görür; yeni projede bu bölüm yoktur.
+  // Bakım işinde brif yazarı (ajan ya da yönetici) isteği, analizi ve bulguları görür; yeni projede bu bölüm yoktur.
   const maintJob = { ...job, plan: { ...job.plan, maintenance: { kind: 'bugfix', request: 'Sepet toplamı yanlış', summary: 'Kök neden: float toplama', findings: [{ type: 'bug', severity: 'high', title: 'Yuvarlama', detail: 'kuruşlar float toplanıyor', files: ['src/cart.ts'] }] } } };
   for (const text of [P.briefAgentPrompt({ job: maintJob, task }), P.briefUserText({ job: maintJob, task, fileTree: '', keyFiles: '' })]) {
     assert.match(text, /# Maintenance job: BUG FIX[\s\S]*User's request \(verbatim\): Sepet toplamı yanlış[\s\S]*- \[high\] Yuvarlama \(src\/cart\.ts\): kuruşlar float toplanıyor[\s\S]*start from the ROOT CAUSE[\s\S]*# Plan overview/);
@@ -264,7 +264,7 @@ test('İstemler: sağlamlık plana baştan girer; Gemini önce kırmayı dener; 
   assert.match(P.finalReviewSystem('Turkish'), /fresh-clone check/);
 });
 
-// ---------- görev döngüsü (taklit ajan ve Gemini ile uçtan uca) ----------
+// ---------- görev döngüsü (taklit ajan ve yönetici ile uçtan uca) ----------
 function taskHarness({ reviews, specialist = [], verify: verifyResults = () => 'confirmed', recheck = () => 'fixed', carried = [], settings: extra = {}, agentReviews = null, brief = null } = {}) {
   const jobs = require('../src/main/jobs');
   const project = require('../src/main/project');
@@ -328,8 +328,8 @@ function taskHarness({ reviews, specialist = [], verify: verifyResults = () => '
     if (/^düzeltme /.test(label)) return { ok: true, text: 'düzelttim', sessionId: 's1' };
     throw new Error(`beklenmeyen ajan çağrısı: ${label}`);
   };
-  // Bu düzenek varsayılan olarak Gemini'nin "her adımda" rolünü sınar (ilk inceleme Gemini'den); ajan rolü ayrıca sınanır.
-  const s = { verifyEachTask: true, taskBriefing: false, tddMode: false, reviewLevel: 'deep', reviewPanel: true, maxFixAttempts: 2, standards: '', geminiRole: 'full', ...extra };
+  // Bu düzenek varsayılan olarak yöneticinin "her adımda" rolünü sınar (ilk inceleme yöneticiden); ajan rolü ayrıca sınanır.
+  const s = { verifyEachTask: true, taskBriefing: false, tddMode: false, reviewLevel: 'deep', reviewPanel: true, maxFixAttempts: 2, standards: '', managerRole: 'full', ...extra };
   const restore = () => {
     verify.runChecks = saved.runChecks;
     for (const k of Object.keys(savedProject)) project[k] = savedProject[k];
@@ -348,7 +348,7 @@ test('Görev döngüsü: doğrulanmış orta bulgu aynı görevde düzeltilir, d
   const h = taskHarness({ reviews: [{ ...PASS, findings: [managerFinding], qualityScore: 10 }, PASS], specialist: [stuck], carried: ['src/runner.ts'] });
   try {
     await h.o.runTask(h.task, h.s);
-    // Sıra: görev → (Gemini) → güvenlik + iş kuralları uzmanı + mimari (ilk görev) → doğrulama → düzeltme → yeniden doğrulama.
+    // Sıra: görev → (yönetici) → güvenlik + iş kuralları uzmanı + mimari (ilk görev) → doğrulama → düzeltme → yeniden doğrulama.
     assert.deepStrictEqual(h.calls.agent.filter((l) => !/^uzman/.test(l)), ['görev 1', 'bulgu doğrulama', 'düzeltme 1/2', 'bulgu yeniden doğrulama']);
     assert.strictEqual(h.calls.agent.filter((l) => /^uzman/.test(l)).length, 3, 'ilk görevde üç uzman; panel düzeltme turunda yeniden çalışmaz');
     // Yarım kalan iş ajana bildirildi; inceleme görevin tabanına göre fark aldı ve ilgili dosyaları gördü.
@@ -371,7 +371,7 @@ test('Görev döngüsü: doğrulanmış orta bulgu aynı görevde düzeltilir, d
 });
 
 test('Görev döngüsü: yanlış alarm düzeltme turu açmaz; kapanmayan orta bulgu defterde açık kalır ve görev "sorunlu" sayılmaz', async () => {
-  // 1) Gemini yalnızca bulgularına dayanarak "düzelt" dedi; doğrulayıcı hepsini reddetti → onay, düzeltme turu yok.
+  // 1) Yönetici yalnızca bulgularına dayanarak "düzelt" dedi; doğrulayıcı hepsini reddetti → onay, düzeltme turu yok.
   const claim = { severity: 'high', title: 'API yok', file: 'src/x.ts', problem: 'p', scenario: 's', fix: 'f' };
   const a = taskHarness({ reviews: [{ ...PASS, verdict: 'fix', findings: [claim], fixInstructions: 'düzelt' }], verify: () => 'rejected' });
   try {
@@ -475,7 +475,7 @@ function stageHarness({ reviews, panel = null, verifyVerdict = () => 'confirmed'
     }
     return { ok: true, text: 'düzelttim' };
   };
-  const s = { reviewLevel: 'deep', reviewPanel: true, maxFixAttempts: 2, finalFixAttempts: 3, securityReview: true, visualTest: true, strictPhaseGates: true, standards: '', geminiRole: 'full', ...settingsExtra };
+  const s = { reviewLevel: 'deep', reviewPanel: true, maxFixAttempts: 2, finalFixAttempts: 3, securityReview: true, visualTest: true, strictPhaseGates: true, standards: '', managerRole: 'full', ...settingsExtra };
   const restore = () => {
     for (const k of Object.keys(savedProject)) project[k] = savedProject[k];
     verify.dependencyAudit = savedAudit;
@@ -489,7 +489,7 @@ test('Faz kapısı: açık bulgular yeniden doğrulanır; yönetici bulguları d
   const L = require('../src/main/panel');
   const bad = { pages: [], problems: [{ level: 'error', route: '/menu', viewport: 'mobil', text: 'Mobilde yatay taşma: 64px' }, { level: 'warn', route: '/', viewport: '', text: 'Erişilebilirlik: h1 başlığı yok' }] };
   const h = stageHarness({
-    // Gemini: bulgulara dayanan "düzelt" (doğrulayıcı reddedecek); ikinci turda onay.
+    // Yönetici: bulgulara dayanan "düzelt" (doğrulayıcı reddedecek); ikinci turda onay.
     reviews: [{ ...PASS, verdict: 'fix', findings: [{ severity: 'high', title: 'Yarış durumu', file: 'src/a.ts', problem: 'p', scenario: 's', fix: 'f' }], fixInstructions: 'x' }, PASS],
     panel: { confirmed: [], uncertain: [], rejected: [], summaries: [] },
     verifyVerdict: () => 'rejected',
@@ -503,7 +503,7 @@ test('Faz kapısı: açık bulgular yeniden doğrulanır; yönetici bulguları d
     assert.deepStrictEqual([gate.status, gate.attempts], ['passed', 1]);
     assert.deepStrictEqual(h.calls.fresh, [true, false], 'temiz klon ilk turda; başarısız olmadıysa yinelenmez');
     assert.strictEqual(h.calls.panel, 1, 'panel yalnızca ilk turda');
-    // İlk tur: defterdeki bulgu "düzeldi" → kapandı; Gemini'nin bulgusu reddedildi → yalnızca sayfa kusuru engelledi.
+    // İlk tur: defterdeki bulgu "düzeldi" → kapandı; yöneticinin bulgusu reddedildi → yalnızca sayfa kusuru engelledi.
     assert.deepStrictEqual(h.o.job.findings.map((f) => f.status), ['fixed']);
     const fixPrompt = h.calls.prompts['faz düzeltme 1/2'];
     assert.match(fixPrompt, /Tarayıcı testi · \/menu \(mobil\): Mobilde yatay taşma: 64px/);
@@ -585,7 +585,7 @@ test('Tasarruf: sürdürülen görevde brif yeniden yazılmaz; hafıza oturumuna
   agents.resolveBin = (id) => (id === 'claude' ? '/usr/local/bin/claude' : null);
   try {
     // Yarım kalmış görev (taban commit'ten beri değişen dosya var) ve önceki çalışmanın brifi: yeni brif oturumu açılmaz.
-    const h = taskHarness({ reviews: [PASS], agentReviews: [PASS], brief: '## YENİ BRİF', carried: ['src/runner.ts'], settings: { geminiRole: 'manager', taskBriefing: true, reviewPanel: false } });
+    const h = taskHarness({ reviews: [PASS], agentReviews: [PASS], brief: '## YENİ BRİF', carried: ['src/runner.ts'], settings: { managerRole: 'manager', taskBriefing: true, reviewPanel: false } });
     try {
       h.task.brief = '## ESKİ BRİF\n' + 'x'.repeat(2000);
       h.task.briefBy = 'Claude Fable 5.1';
@@ -597,8 +597,18 @@ test('Tasarruf: sürdürülen görevde brif yeniden yazılmaz; hafıza oturumuna
     } finally {
       h.restore();
     }
-    // Yeni başlayan görev (yarım iş yok) brifi her zaman yazdırır, önceden bir brif kalmış olsa bile.
-    const f = taskHarness({ reviews: [PASS], agentReviews: [PASS], brief: '## YENİ BRİF\n' + 'y'.repeat(600), settings: { geminiRole: 'manager', taskBriefing: true, reviewPanel: false } });
+    // Durdurulup sürdürülen görev (henüz dosya değişmemiş olsa da) tam brifini korur: durdur/sürdür brifi baştan yazdırmaz.
+    const r = taskHarness({ reviews: [PASS], agentReviews: [PASS], brief: '## YENİ BRİF\n' + 'y'.repeat(600), settings: { managerRole: 'manager', taskBriefing: true, reviewPanel: false } });
+    try {
+      r.task.brief = '## ESKİ BRİF\n' + 'x'.repeat(2000);
+      await r.o.runTask(r.task, r.s);
+      assert.ok(!r.calls.agent.some((l) => /^teknik brif/.test(l)), 'sürdürülen görevde brif oturumu açılmaz');
+      assert.match(r.task.brief, /^## ESKİ BRİF/);
+    } finally {
+      r.restore();
+    }
+    // Kısa / bozuk kalmış brif (kabul eşiğinin altı) ve brifi hiç olmayan görev yazdırır.
+    const f = taskHarness({ reviews: [PASS], agentReviews: [PASS], brief: '## YENİ BRİF\n' + 'y'.repeat(600), settings: { managerRole: 'manager', taskBriefing: true, reviewPanel: false } });
     try {
       f.task.brief = '## ESKİ BRİF';
       await f.o.runTask(f.task, f.s);
@@ -626,31 +636,20 @@ test('Tasarruf: sürdürülen görevde brif yeniden yazılmaz; hafıza oturumuna
   assert.strictEqual(big.diff.length, 120000, 'çağıranın farkı değişmez');
 });
 
-test('Gemini şeması: alan sırası ipucu reddedilirse şema sırasız gönderilir', () => {
-  const { withoutKey } = require('../src/main/gemini');
-  const P = require('../src/main/prompts');
-  const stripped = withoutKey(P.REVIEW_SCHEMA, 'propertyOrdering');
-  assert.ok(!JSON.stringify(stripped).includes('propertyOrdering'));
-  assert.deepStrictEqual(Object.keys(stripped.properties), Object.keys(P.REVIEW_SCHEMA.properties), 'yalnızca ipucu çıkar; alanlar ve sıraları aynı kalır');
-  assert.deepStrictEqual(stripped.required, P.REVIEW_SCHEMA.required);
-  assert.ok(JSON.stringify(P.REVIEW_SCHEMA).includes('propertyOrdering'), 'özgün şema değişmez');
-});
-
-// ---------- roller: Gemini yönetici, yapım döngüsü ajanlarda ----------
-test('Roller: teknik brifi Claude Fable 5.1 yazar; görevin ilk incelemesini ajan yapar, Gemini çağrılmaz', async () => {
+// ---------- roller: yönetici onaylar, yapım döngüsü ajanlarda ----------
+test('Roller: teknik brifi Claude Fable 5.1 yazar; görevin ilk incelemesini ajan yapar, yönetici çağrılmaz', async () => {
   const agents = require('../src/main/agents');
   const models = require('../src/main/models');
   assert.strictEqual(models.BRIEF_MODEL, 'claude-fable-5-1');
   assert.strictEqual(models.briefModelOf({}), 'claude-fable-5-1');
   assert.strictEqual(models.briefModelOf({ briefBy: 'coder', claudeModel: '' }), 'claude-opus-5-5');
-  assert.strictEqual(models.briefModelOf({ briefBy: 'gemini' }), null);
   const savedBin = agents.resolveBin;
   agents.resolveBin = (id) => (id === 'claude' ? '/usr/local/bin/claude' : null);
   const BRIEF = `## 1. Builds on\n${'src/store.ts — transition() '.repeat(30)}`;
   const untested = { severity: 'medium', title: 'Untested: zaman aşımı yolu', file: 'src/runner.ts', line: 60, problem: 'test yok', scenario: 'sağlayıcı zaman aşımı', fix: 'test ekle' };
   const agentPass = { ...PASS, testsRun: [{ command: 'npm test', result: 'pass' }] };
-  // Varsayılan rol ("manager"): geminiRole verilmez.
-  const h = taskHarness({ reviews: [PASS], agentReviews: [{ ...agentPass, findings: [untested], scores: { correctness: 9, robustness: 7, tests: 6, maintainability: 9, ux: 8 } }, agentPass], brief: BRIEF, settings: { geminiRole: 'manager', taskBriefing: true } });
+  // Varsayılan rol ("manager"): managerRole verilmez.
+  const h = taskHarness({ reviews: [PASS], agentReviews: [{ ...agentPass, findings: [untested], scores: { correctness: 9, robustness: 7, tests: 6, maintainability: 9, ux: 8 } }, agentPass], brief: BRIEF, settings: { managerRole: 'manager', taskBriefing: true } });
   try {
     await h.o.runTask(h.task, h.s);
     // Brif: Claude Fable 5.1, salt okunur oturum; kodlayan ajanın istemine girer.
@@ -660,8 +659,8 @@ test('Roller: teknik brifi Claude Fable 5.1 yazar; görevin ilk incelemesini aja
     assert.match(h.calls.prompts[briefLabel], /Your FINAL message must be the brief itself/);
     assert.strictEqual(h.task.brief, BRIEF.trim());
     assert.match(h.calls.prompts['görev 1'], /## Implementation brief from the tech lead[\s\S]*transition\(\)/);
-    // İlk inceleme ajandan; Gemini hiç çağrılmadı. Bulgusu doğrulandı, düzeltildi, yeniden doğrulandı.
-    assert.strictEqual(h.calls.gem.length, 0, 'yapım döngüsünde Gemini çağrısı yok');
+    // İlk inceleme ajandan; yönetici hiç çağrılmadı. Bulgusu doğrulandı, düzeltildi, yeniden doğrulandı.
+    assert.strictEqual(h.calls.gem.length, 0, 'yapım döngüsünde yönetici çağrısı yok');
     const reviewLabel = 'inceleme · Pipeline';
     assert.strictEqual(h.calls.opts[reviewLabel].schema, require('../src/main/prompts').AGENT_REVIEW_SCHEMA);
     assert.match(h.calls.prompts[reviewLabel], /Run the relevant checks yourself/);
@@ -671,13 +670,13 @@ test('Roller: teknik brifi Claude Fable 5.1 yazar; görevin ilk incelemesini aja
     assert.deepStrictEqual(h.o.job.findings.map((f) => [f.area, f.status]), [['manager', 'fixed']]);
     assert.deepStrictEqual([h.task.status, h.task.review.verdict], ['done', 'pass']);
     assert.ok(h.o.logs.some((l) => /^review\/ok: İnceleme \(Pipeline\): ONAYLANDI/.test(l)), 'inceleme günlüğü ajan kaynağıyla yazılır');
-    assert.ok(!h.o.logs.some((l) => /^gemini\//.test(l)), 'günlükte Gemini satırı yok');
+    assert.ok(!h.o.logs.some((l) => /^manager\//.test(l)), 'günlükte yönetici satırı yok');
   } finally {
     agents.resolveBin = savedBin;
     h.restore();
   }
   // İnceleyicinin kendi çalıştırdığı test başarısızsa onay verilemez.
-  const f = taskHarness({ reviews: [PASS], agentReviews: [{ ...agentPass, testsRun: [{ command: 'npm test', result: 'fail', note: '2 test kırık' }] }, agentPass], settings: { geminiRole: 'manager', reviewPanel: false } });
+  const f = taskHarness({ reviews: [PASS], agentReviews: [{ ...agentPass, testsRun: [{ command: 'npm test', result: 'fail', note: '2 test kırık' }] }, agentPass], settings: { managerRole: 'manager', reviewPanel: false } });
   try {
     await f.o.runTask(f.task, f.s);
     assert.match(f.calls.prompts['düzeltme 1/2'], /İnceleyicinin çalıştırdığı komut başarısız: npm test — 2 test kırık/);
@@ -686,13 +685,17 @@ test('Roller: teknik brifi Claude Fable 5.1 yazar; görevin ilk incelemesini aja
   } finally {
     f.restore();
   }
-  // Ajan incelemesi sonuç vermezse ve Gemini anahtarı yoksa karar doğrulama komutlarına dayanır (iş kilitlenmez).
-  const g = taskHarness({ reviews: [PASS], agentReviews: null, settings: { geminiRole: 'manager', reviewPanel: false } });
+  // Ajan incelemesi sonuç vermezse ve yönetici hazır değilse karar doğrulama komutlarına dayanır (iş kilitlenmez).
+  const g = taskHarness({ reviews: [PASS], agentReviews: null, settings: { managerRole: 'manager', reviewPanel: false } });
+  const settingsMod = require('../src/main/settings');
+  const savedReady = settingsMod.managerReady;
+  settingsMod.managerReady = () => false;
   try {
     await g.o.runTask(g.task, g.s);
     assert.deepStrictEqual([g.task.status, g.calls.gem.length], ['done', 0]);
     assert.match(g.task.review.summary, /Bağımsız inceleme yapılamadı/);
   } finally {
+    settingsMod.managerReady = savedReady;
     g.restore();
   }
 });
@@ -703,10 +706,12 @@ test('Roller: brif yedekleri, hafızayı ajanın güncellemesi ve ajanların yü
   const docs = require('../src/main/docs');
   const savedBin = agents.resolveBin;
   const savedGet = settings.get;
+  const savedReady = settings.managerReady;
   agents.resolveBin = (id) => (id === 'claude' ? '/usr/local/bin/claude' : null);
   try {
-    // Fable brif veremezse ve Gemini anahtarı yoksa görev plan ayrıntılarıyla sürer.
-    const a = taskHarness({ reviews: [PASS], agentReviews: [{ ...PASS }], brief: null, settings: { geminiRole: 'manager', taskBriefing: true, reviewPanel: false } });
+    // Fable brif veremezse ve yönetici hazır değilse görev plan ayrıntılarıyla sürer.
+    settings.managerReady = () => false;
+    const a = taskHarness({ reviews: [PASS], agentReviews: [{ ...PASS }], brief: null, settings: { managerRole: 'manager', taskBriefing: true, reviewPanel: false } });
     try {
       await a.o.runTask(a.task, a.s);
       assert.strictEqual(a.task.brief, undefined);
@@ -715,16 +720,19 @@ test('Roller: brif yedekleri, hafızayı ajanın güncellemesi ve ajanların yü
     } finally {
       a.restore();
     }
-    // Ayarlar'da brif Gemini'ye verildiyse Gemini yazar.
-    const b = taskHarness({ reviews: ['## Brief\nGemini brifi'], agentReviews: [{ ...PASS }], settings: { geminiRole: 'manager', taskBriefing: true, briefBy: 'gemini', reviewPanel: false } });
+    // Claude kurulu değilse brifi yönetici yazar (ajan oturumu açılmaz).
+    settings.managerReady = () => true;
+    agents.resolveBin = () => null;
+    const b = taskHarness({ reviews: ['## Brief\nYönetici brifi'], agentReviews: [{ ...PASS }], settings: { managerRole: 'manager', taskBriefing: true, reviewPanel: false } });
     try {
       await b.o.runTask(b.task, b.s);
-      assert.strictEqual(b.task.brief, '## Brief\nGemini brifi');
+      assert.strictEqual(b.task.brief, '## Brief\nYönetici brifi');
       assert.ok(!b.calls.agent.some((l) => /^teknik brif/.test(l)));
     } finally {
       b.restore();
     }
-    // Hafıza: ajan günceller (dersler dahil); Gemini çağrılmaz.
+    agents.resolveBin = (id) => (id === 'claude' ? '/usr/local/bin/claude' : null);
+    // Hafıza: ajan günceller (dersler dahil); yönetici çağrılmaz.
     const jobs = require('../src/main/jobs');
     jobs._setRoot(tmp());
     const o = orch();
@@ -732,13 +740,13 @@ test('Roller: brif yedekleri, hafızayı ajanın güncellemesi ve ajanların yü
     o.reviewerId = () => 'claude';
     const seen = [];
     o.gem = async () => {
-      throw new Error('Gemini çağrılmamalı');
+      throw new Error('Yönetici çağrılmamalı');
     };
     o.runAgent = async (prompt, opts) => {
       seen.push([opts.label, opts.effort, opts.mode, prompt]);
       return { ok: true, structured: { memory: '## Status\nPipeline hazır', carryOver: ['runner.ts transition() kullan'], lessons: ['Terminal durum ezilmez.'] } };
     };
-    settings.get = () => ({ ...savedGet(), geminiRole: 'manager', standards: '' });
+    settings.get = () => ({ ...savedGet(), managerRole: 'manager', standards: '' });
     await o.remember({ id: 't1', title: 'Pipeline', details: 'd', status: 'done', agentSummary: 'özet', review: { verdict: 'pass', summary: 'iyi', issues: [] } }, 'Görev 1/1 — Pipeline');
     assert.deepStrictEqual([seen.length, seen[0][0], seen[0][1], seen[0][2]], [1, 'proje hafızası', 'low', 'review']);
     assert.match(seen[0][3], /Your FINAL action must be calling the StructuredOutput tool with "memory", "carryOver" and "lessons"/);
@@ -750,25 +758,26 @@ test('Roller: brif yedekleri, hafızayı ajanın güncellemesi ve ajanların yü
   } finally {
     agents.resolveBin = savedBin;
     settings.get = savedGet;
+    settings.managerReady = savedReady;
   }
 
-  // Faz kapısı (yönetici rolü): Gemini çağrılmaz; karar derin incelemeden ve doğrulanmış bulgulardan gelir.
-  let geminiCalls = 0;
+  // Faz kapısı (yönetici rolü): yönetici çağrılmaz; karar derin incelemeden ve doğrulanmış bulgulardan gelir.
+  let managerCalls = 0;
   const gate = stageHarness({
     reviews: [PASS],
     panel: { confirmed: [finding('medium', 'Sınır test edilmiyor', { file: 'src/graph.ts' })], uncertain: [], rejected: [], summaries: [] },
-    settings: { geminiRole: 'manager' },
+    settings: { managerRole: 'manager' },
     deep: (n) => ({ verdict: 'pass', summary: `derin tur ${n}`, issues: [], requirementChecks: [], testsRun: [], qualityScore: 9 }),
   });
   try {
     const gem = gate.o.gem;
     gate.o.gem = async (a) => {
-      geminiCalls++;
+      managerCalls++;
       return gem(a);
     };
     await gate.o.runPhaseGate('Faz 1', gate.s);
     const g = gate.o.job.gates['Faz 1'];
-    assert.strictEqual(geminiCalls, 0, 'faz kapısında Gemini çağrısı yok');
+    assert.strictEqual(managerCalls, 0, 'faz kapısında yönetici çağrısı yok');
     assert.deepStrictEqual([g.status, g.attempts, g.review.summary], ['passed', 1, 'derin tur 1']);
     assert.deepStrictEqual(gate.o.job.findings.map((f) => f.status), ['fixed']);
     assert.ok(gate.o.logs.some((l) => /^review\/warn: Faz kapısı \(Faz 1\): DÜZELTME GEREKLİ · kalite 8\/10/.test(l)), 'puan derin incelemeden gelir ve doğrulanmış bulguyla sınırlanır');
@@ -777,7 +786,7 @@ test('Roller: brif yedekleri, hafızayı ajanın güncellemesi ve ajanların yü
   }
 });
 
-test('Roller: TDD testlerini yönetici rolünde ajan inceler; ajan sonuç vermezse Gemini yedektir', async () => {
+test('Roller: TDD testlerini yönetici rolünde ajan inceler; ajan sonuç vermezse yönetici yedektir', async () => {
   const agents = require('../src/main/agents');
   const settings = require('../src/main/settings');
   const project = require('../src/main/project');
@@ -804,28 +813,28 @@ test('Roller: TDD testlerini yönetici rolünde ajan inceler; ajan sonuç vermez
   const fix = { verdict: 'fix', problems: [{ file: 'tests/cli.test.js', problem: 'yanlış çıkış kodu bekliyor', fix: '1 bekle' }] };
   const failed = { ok: false, error: 'oturum hatası', transcript: '' };
   try {
-    // Yönetici rolü: salt okunur ajan oturumu inceler; Gemini çağrılmaz.
+    // Yönetici rolü: salt okunur ajan oturumu inceler; yönetici çağrılmaz.
     const a = make({ ok: true, structured: fix });
-    const ra = await a.o.reviewTddTests(task, files, { geminiRole: 'manager', reviewEffort: 'medium' });
+    const ra = await a.o.reviewTddTests(task, files, { managerRole: 'manager', reviewEffort: 'medium' });
     assert.deepStrictEqual([ra.tr, ra.src, a.seen.gem, a.seen.agent.length], [fix, 'review', 0, 1]);
     assert.deepStrictEqual([a.seen.agent[0].label, a.seen.agent[0].mode, a.seen.agent[0].agentId, a.seen.agent[0].effort], ['TDD test incelemesi', 'review', 'claude', 'medium']);
     assert.strictEqual(a.seen.agent[0].schema, P.TEST_REVIEW_JSON_SCHEMA);
     assert.deepStrictEqual(P.TEST_REVIEW_JSON_SCHEMA.properties.verdict, { type: 'string', enum: ['ok', 'fix'] });
     assert.match(a.seen.agent[0].prompt, /READ-ONLY mode[\s\S]*do not run the suite[\s\S]*StructuredOutput tool with "verdict" and "problems"[\s\S]*ŞARTNAME[\s\S]*TEST DOSYASI/);
-    // Ajan sonuç vermezse: anahtar varsa Gemini inceler, yoksa inceleme atlanır (iş kilitlenmez).
-    settings.get = () => ({ ...saved.get(), geminiKey: 'anahtar' });
+    // Ajan sonuç vermezse: yönetici hazırsa (ör. yerel model seçili) o inceler, yoksa inceleme atlanır (iş kilitlenmez).
+    settings.get = () => ({ ...saved.get(), managerBy: 'local', localModel: 'qwen3' });
     const b = make(failed);
-    const rb = await b.o.reviewTddTests(task, files, { geminiRole: 'manager' });
-    assert.deepStrictEqual([rb.tr.verdict, rb.src, b.seen.gem], ['ok', 'gemini', 1]);
-    settings.get = () => ({ ...saved.get(), geminiKey: '' });
+    const rb = await b.o.reviewTddTests(task, files, { managerRole: 'manager' });
+    assert.deepStrictEqual([rb.tr.verdict, rb.src, b.seen.gem], ['ok', 'manager', 1]);
+    settings.get = () => ({ ...saved.get(), managerBy: 'local', localModel: '' });
     const c = make(failed);
-    const rc = await c.o.reviewTddTests(task, files, { geminiRole: 'manager' });
+    const rc = await c.o.reviewTddTests(task, files, { managerRole: 'manager' });
     assert.deepStrictEqual([rc.tr, c.seen.gem], [null, 0]);
     assert.ok(c.o.logs.some((l) => /TDD test incelemesi sonuç vermedi/.test(l)));
-    // "Her adımda" rolü: Gemini inceler, ajan oturumu açılmaz.
+    // "Her adımda" rolü: yönetici inceler, ajan oturumu açılmaz.
     const d = make({ ok: true, structured: fix });
-    const rd = await d.o.reviewTddTests(task, files, { geminiRole: 'full' });
-    assert.deepStrictEqual([rd.src, d.seen.gem, d.seen.agent.length], ['gemini', 1, 0]);
+    const rd = await d.o.reviewTddTests(task, files, { managerRole: 'full' });
+    assert.deepStrictEqual([rd.src, d.seen.gem, d.seen.agent.length], ['manager', 1, 0]);
   } finally {
     agents.resolveBin = saved.bin;
     settings.get = saved.get;

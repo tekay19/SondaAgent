@@ -69,6 +69,24 @@ test('Ajan argümanları: tam otomatik ve güvenli mod', () => {
   assert.ok(safe.includes('acceptEdits') && !safe.includes('--dangerously-skip-permissions'));
   const codex = ADAPTERS.codex.buildArgs({ settings: { codexPermission: 'full' }, lastMessageFile: '/tmp/x' });
   assert.strictEqual(codex[codex.length - 1], '-', 'istem stdin üzerinden okunmalı');
+  assert.ok(!codex.includes('--oss'), 'yerel model kapalıyken --oss yok');
+  // Codex yerel modelle: --oss + sağlayıcı (Ollama varsayılan, LM Studio seçilebilir) + Ollama'daki model adı.
+  const local = ADAPTERS.codex.buildArgs({ settings: { codexPermission: 'full', codexProvider: 'local', codexModel: 'qwen3-coder:30b' } });
+  assert.deepStrictEqual(local.slice(local.indexOf('--oss'), local.indexOf('--oss') + 5), ['--oss', '--local-provider', 'ollama', '--model', 'qwen3-coder:30b']);
+  assert.strictEqual(ADAPTERS.codex.buildArgs({ settings: { codexProvider: 'local', codexLocalProvider: 'lmstudio' } })[5], 'lmstudio');
+  // NVIDIA NIM: sağlayıcı -c ile tanımlanır, model boşsa yöneticinin NIM modeli; anahtar yalnızca Codex ortamına NVIDIA_API_KEY olarak girer.
+  const nim = ADAPTERS.codex.buildArgs({ settings: { codexProvider: 'nim', nimModel: 'qwen/qwen3-coder-480b-a35b-instruct', nimBaseUrl: 'https://integrate.api.nvidia.com/v1' } });
+  assert.ok(nim.includes('model_provider=nim') && nim.includes('model_providers.nim.base_url="https://integrate.api.nvidia.com/v1"') && nim.includes('model_providers.nim.env_key="NVIDIA_API_KEY"') && nim.includes('model_providers.nim.wire_api="chat"'));
+  assert.strictEqual(nim[nim.indexOf('--model') + 1], 'qwen/qwen3-coder-480b-a35b-instruct');
+  assert.ok(!nim.includes('--oss'));
+  const { agentRunEnv } = require('../src/main/agents');
+  assert.strictEqual(agentRunEnv('codex', { codexProvider: 'nim', nimApiKey: 'nvapi-test-key-123456' }).NVIDIA_API_KEY, 'nvapi-test-key-123456');
+  assert.strictEqual(agentRunEnv('codex', { codexProvider: 'local', nimApiKey: 'nvapi-test-key-123456' }).NVIDIA_API_KEY, undefined, 'NIM seçili değilse anahtar gitmez');
+  assert.strictEqual(agentRunEnv('claude', { codexProvider: 'nim', nimApiKey: 'nvapi-test-key-123456' }).NVIDIA_API_KEY, undefined, 'Claude oturumuna hiç gitmez');
+  // Claude: kişisel ayarlar varsayılan olarak yüklenmez (yalnızca projenin ayarları); kullanıcı açınca bayrak kalkar.
+  const iso = ADAPTERS.claude.buildArgs({ settings: {} });
+  assert.deepStrictEqual(iso.slice(iso.indexOf('--setting-sources'), iso.indexOf('--setting-sources') + 2), ['--setting-sources', 'project']);
+  assert.ok(!ADAPTERS.claude.buildArgs({ settings: { claudeUserSettings: true } }).includes('--setting-sources'));
 });
 
 test('planChecks: normal mod temel betikleri, tam mod entegrasyon/e2e ve servisleri ekler', () => {
@@ -196,12 +214,6 @@ test('isEmptyDir: yalnızca kalıntı (.git, .env, .next…) içeren klasör bo�
   assert.strictEqual(isEmptyDir(dir), false);
 });
 
-test('toGeminiSchema: JSON Schema tiplerini Gemini biçimine çevirir', () => {
-  const { toGeminiSchema } = require('../src/main/gemini');
-  const out = toGeminiSchema({ type: 'object', properties: { a: { type: 'array', items: { type: 'string', enum: ['x'] } } }, required: ['a'], additionalProperties: false });
-  assert.deepStrictEqual(out, { type: 'OBJECT', properties: { a: { type: 'ARRAY', items: { type: 'STRING', enum: ['x'] } } }, required: ['a'] });
-});
-
 test('procs: yalnızca sahipsiz kalan süreç kapatılır; sahibi yaşayan sürece dokunulmaz', { skip: process.platform === 'win32' }, async () => {
   const { projectProcesses, killOrphans, orphansOf } = require('../src/main/procs');
   const { spawn, execFileSync } = require('child_process');
@@ -272,7 +284,7 @@ test('versions: teknoloji eşleşmesi kelime içinde yanlış pozitif vermez', (
   assert.ok(hits('Astro ile blog').includes('astro'));
 });
 
-test('Claude mühendis planlar, Gemini yönetici değerlendirir: istemler', () => {
+test('Claude mühendis planlar, yönetici değerlendirir: istemler', () => {
   const P = require('../src/main/prompts');
   const head = { projectName: 'mavi-kapi', summary: 'Restoran sitesi', stack: ['Next.js'], language: 'Turkish', assumptions: ['TR'], requirements: [{ id: 'R1', text: 'Menü filtrelenir' }, { id: 'R2', text: 'Rezervasyon formu' }] };
   const plan = P.claudePlanPrompt({ base: '# User request\nrestoran', head });
@@ -681,4 +693,110 @@ test('Simgeler: kullanılan her simge tanımlıdır; metin işaretleri yerine te
   }
   for (const g of ['✕', '○', '◐', '↻']) if (html.includes(g)) stray.push(`index.html: ${g}`);
   assert.deepStrictEqual(stray, [], `metin işareti kaldı: ${stray.join('; ')}`);
+});
+
+test('IPC kanalları tek kez kaydedilir: main.js içinde yinelenen handle() yok, preload içinde yinelenen anahtar yok (ikinci kayıt uygulamayı açılışta düşürür)', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const main = fs.readFileSync(path.join(__dirname, '..', 'src', 'main', 'main.js'), 'utf8');
+  const channels = [...main.matchAll(/^handle\('([^']+)'/gm)].map((m) => m[1]);
+  const dup = channels.filter((c, i) => channels.indexOf(c) !== i);
+  assert.deepStrictEqual(dup, [], 'yinelenen IPC kanalı');
+  const preload = fs.readFileSync(path.join(__dirname, '..', 'src', 'main', 'preload.js'), 'utf8');
+  const keys = [...preload.matchAll(/^\s{2}([A-Za-z]+):\s*\(/gm)].map((m) => m[1]);
+  assert.deepStrictEqual(keys.filter((k, i) => keys.indexOf(k) !== i), [], 'yinelenen preload anahtarı');
+  // Arayüzün çağırdığı her kanal ana süreçte kayıtlı olmalı.
+  const called = [...preload.matchAll(/call\('([^']+)'/g)].map((m) => m[1]);
+  assert.deepStrictEqual(called.filter((c) => !channels.includes(c)), [], 'preload kanalı main.js\'te yok');
+});
+
+test('OpenCode adaptörü: run --format json, model/oturum bayrakları, yazma oturumunda --auto, salt okunurda plan ajanı; olay akışı günlüğe çevrilir', () => {
+  const { ADAPTERS } = require('../src/main/agents');
+  const { opencodeCredentials } = require('../src/main/agents');
+  const code = ADAPTERS.opencode.buildArgs({ settings: { opencodeModel: 'nvidia/deepseek-ai/deepseek-v4-pro' }, resumeId: 'ses_1' });
+  assert.deepStrictEqual(code, ['run', '--format', 'json', '-m', 'nvidia/deepseek-ai/deepseek-v4-pro', '-s', 'ses_1', '--auto']);
+  const review = ADAPTERS.opencode.buildArgs({ settings: { opencodeModel: 'a/b', opencodeReviewModel: 'c/d' }, mode: 'review' });
+  assert.deepStrictEqual(review, ['run', '--format', 'json', '-m', 'c/d', '--agent', 'plan']);
+  assert.ok(!review.includes('--auto'), 'salt okunur oturum izinleri otomatik onaylamaz');
+  assert.deepStrictEqual(ADAPTERS.opencode.buildArgs({ settings: {}, mode: 'review' }), ['run', '--format', 'json', '--agent', 'plan'], 'model boşsa OpenCode varsayılanı');
+  const p = ADAPTERS.opencode.createParser();
+  const lines = [
+    { type: 'step_start', sessionID: 'ses_9', part: { type: 'step-start' } },
+    { type: 'tool', sessionID: 'ses_9', part: { type: 'tool', tool: 'bash', state: { status: 'completed', input: { command: 'npm test' }, output: '3 passed' } } },
+    { type: 'text', sessionID: 'ses_9', part: { type: 'text', text: 'Bitti: ' + JSON.stringify({ verdict: 'pass' }) } },
+    { type: 'step_finish', sessionID: 'ses_9', part: { type: 'step-finish', reason: 'stop', tokens: { total: 1500 }, cost: 0.01 } },
+  ].map((o) => JSON.stringify(o));
+  const log = lines.flatMap((l) => p.onLine(l));
+  assert.deepStrictEqual([p.state.sessionId, p.state.gotResult, p.state.tokens, p.state.isError], ['ses_9', true, 1500, false]);
+  assert.match(p.state.text, /verdict/);
+  assert.deepStrictEqual(log.map((l) => l.lvl), ['info', 'tool', 'dim', 'text', 'ok']);
+  assert.match(log[1].text, /bash · npm test/);
+  const err = ADAPTERS.opencode.createParser();
+  err.onLine(JSON.stringify({ type: 'error', sessionID: 's', error: { name: 'APIError', data: { message: '401 Unauthorized: invalid api key' } } }));
+  assert.deepStrictEqual([err.state.isError, err.state.errorText], [true, '401 Unauthorized: invalid api key']);
+  assert.strictEqual(require('../src/main/agents').failureKind(err.state.errorText), 'auth');
+  // Kimlik listesi: renk kodlu çıktıdan sağlayıcı sayısı ve adları.
+  const auth = opencodeCredentials('\x1b[90m┌\x1b[39m  Credentials ~/.local/share/opencode/auth.json\n\x1b[90m│\x1b[39m\n\x1b[34m●\x1b[39m  Nvidia \x1b[90mapi\n\x1b[90m│\x1b[39m\n\x1b[90m└\x1b[39m  1 credentials\n');
+  assert.deepStrictEqual(auth, { count: 1, providers: ['Nvidia'] });
+  assert.deepStrictEqual(opencodeCredentials('└  0 credentials'), { count: 0, providers: [] });
+});
+
+test('OpenCode veri klasörü: Sonda kendi XDG_DATA_HOME\'unu verir, var olan auth.json ilk kullanımda kopyalanır, sonra ezilmez', () => {
+  const { opencodeDataHome, agentRunEnv } = require('../src/main/agents');
+  const root = tmp();
+  const seed = path.join(tmp(), 'auth.json');
+  fs.writeFileSync(seed, '{"nvidia":{"type":"api","key":"x"}}');
+  assert.strictEqual(opencodeDataHome({ root, seedFrom: seed }), root);
+  const auth = path.join(root, 'opencode', 'auth.json');
+  assert.ok(fs.existsSync(auth), 'auth.json kopyalandı');
+  fs.writeFileSync(auth, '{"openai":{}}');
+  opencodeDataHome({ root, seedFrom: seed });
+  assert.strictEqual(fs.readFileSync(auth, 'utf8'), '{"openai":{}}', 'var olan anahtar dosyası ezilmez');
+  assert.strictEqual(opencodeDataHome({ root: path.join(root, 'yeni'), seedFrom: path.join(root, 'yok.json') }), path.join(root, 'yeni'), 'tohum yoksa da klasör oluşur');
+  const saved = process.env.SONDA_OPENCODE_DATA;
+  process.env.SONDA_OPENCODE_DATA = root;
+  try {
+    assert.strictEqual(agentRunEnv('opencode').XDG_DATA_HOME, root, 'OpenCode oturumu yalıtılmış klasörle çalışır');
+    assert.strictEqual(agentRunEnv('claude').XDG_DATA_HOME, undefined, 'diğer ajanlara dokunmaz');
+  } finally {
+    if (saved === undefined) delete process.env.SONDA_OPENCODE_DATA;
+    else process.env.SONDA_OPENCODE_DATA = saved;
+  }
+});
+
+// Sahte PE dosyası: MZ başlığı, PE imzası ve isteğe bağlı başlıkta verilen Subsystem değeri (2 = GUI, 3 = konsol).
+function fakePe(file, subsystem) {
+  const buf = Buffer.alloc(64 + 4 + 20 + 70);
+  buf.write('MZ', 0, 'ascii');
+  buf.writeUInt32LE(64, 0x3c);
+  buf.write('PE\0\0', 64, 'ascii');
+  buf.writeUInt16LE(subsystem, 64 + 4 + 20 + 68);
+  fs.writeFileSync(file, buf);
+}
+
+test('Pencereli (GUI) .exe CLI aramasında atlanır: OpenCode masaüstü uygulaması "opencode" adıyla bulunsa da çalıştırılmaz', () => {
+  const env = require('../src/main/env');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sonda-gui-'));
+  const gui = path.join(dir, 'sondatool.exe');
+  const cli = path.join(dir, 'sondacli.exe');
+  fakePe(gui, 2);
+  fakePe(cli, 3);
+  fs.writeFileSync(path.join(dir, 'sondatool.cmd'), '@echo off\r\n');
+  if (!env.IS_WIN) {
+    assert.strictEqual(env.isGuiExecutable(gui), false, 'Windows dışında PE denetimi yok');
+    return;
+  }
+  assert.strictEqual(env.isGuiExecutable(gui), true);
+  assert.strictEqual(env.isGuiExecutable(cli), false);
+  assert.strictEqual(env.isGuiExecutable(path.join(dir, 'yok.exe')), false, 'okunamayan dosya konsol sayılır');
+  assert.strictEqual(env.findExecutable(gui), null, 'açık yol verilse de GUI çalıştırılmaz');
+  assert.strictEqual(env.findExecutable(cli), cli);
+  const savedPath = process.env.PATH;
+  process.env.PATH = dir;
+  try {
+    assert.deepStrictEqual(env.findAllExecutables('sondatool'), [path.join(dir, 'sondatool.cmd')], 'GUI .exe atlanır, yanındaki .cmd bulunur');
+    assert.deepStrictEqual(env.findAllExecutables('sondacli'), [cli]);
+  } finally {
+    process.env.PATH = savedPath;
+  }
 });

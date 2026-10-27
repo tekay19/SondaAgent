@@ -52,7 +52,7 @@ function readText(file, max = 4000) {
   }
 }
 
-// Mevcut proje için Gemini'ye verilecek bağlam.
+// Mevcut proje için yöneticiye verilecek bağlam.
 function describe(dir) {
   if (isEmptyDir(dir)) return null;
   const parts = [`File tree:\n${fileTree(dir)}`];
@@ -335,7 +335,7 @@ function installedVersions(dir) {
   return out;
 }
 
-// ---------- Gemini denetimi için kod içeriği ----------
+// ---------- Yönetici denetimi için kod içeriği ----------
 const TEXT_SOURCE = /\.(ts|tsx|js|jsx|mjs|cjs|json|css|scss|html|md|mdx|prisma|sql|ya?ml|toml|py|go|rs|java|kt|swift|rb|php|vue|svelte|sh|env\.example)$|(^|\/)(Dockerfile|Makefile|\.env\.example)$/;
 const SKIP_SOURCE = /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|next-env\.d\.ts)$|(^|\/)(docs\/sonda|dist|build|out|coverage|\.next|node_modules)\//;
 

@@ -41,7 +41,7 @@ function maintenanceBlock(job) {
   return `${head}\nRules:\n${m.kind === 'bugfix' ? bug : `${ref}\n${bug}`}\n- Stay inside the task: no new features, no dependency upgrades, no drive-by rewrites. Never weaken, skip or delete an existing test to make the suite pass.`;
 }
 
-// İnceleyiciler (Gemini ve Claude) için bakım ölçütleri.
+// İnceleyiciler (yönetici ve Claude) için bakım ölçütleri.
 function maintenanceReviewText(job) {
   const m = job.plan && job.plan.maintenance;
   if (!m) return '';
@@ -79,7 +79,7 @@ function envBlock(env) {
   return `\n${lines.join('\n')}\n`;
 }
 
-// Gemini incelemeleri için: hangi ayarlar ortamdan geliyor; koda gömülmüş gizli değer maskeli görünür.
+// Yönetici incelemeleri için: hangi ayarlar ortamdan geliyor; koda gömülmüş gizli değer maskeli görünür.
 function envReviewText(env) {
   if (!env?.names?.length) return '';
   return `\n# Environment variables supplied by the user via .env (values are secret and never shown)\n${env.names.join(', ')}\nIf a masked value like ‹gizli:NAME› appears inside source code or a diff, a secret was hardcoded — that is a blocking security issue.\n`;
@@ -119,7 +119,7 @@ The implemented UI must match the supplied design: page structure and sections, 
 `;
 }
 
-// Gemini'ye satır içi verilen tasarım önizlemeleri (planlama ve incelemelerde).
+// Yöneticiye satır içi verilen tasarım önizlemeleri (planlama ve incelemelerde).
 function designPreviewParts(job) {
   const parts = [];
   for (const rel of job?.designPreviews || []) {

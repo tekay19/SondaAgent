@@ -144,11 +144,15 @@
               <button id="folderBtn" class="btn ghost sm folder" title="Projenin oluşturulacağı klasör"><svg class="ico" aria-hidden="true"><use href="#i-folder"/></svg> <span id="folderLabel">Klasör seç</span></button>
               <button id="composeEnvBtn" class="btn ghost sm" title="Anahtarlar (.env)" aria-label="Anahtarlar"><svg class="ico" aria-hidden="true"><use href="#i-key"/></svg><span id="composeEnvLabel" hidden></span></button>
               <div class="spacer"></div>
-              <div class="segmented" id="agentSeg" role="radiogroup" aria-label="Kodlama ajanı">
-                <button data-agent="claude" role="radio">Claude Code</button>
-                <button data-agent="codex" role="radio">Codex</button>
-              </div>
               <button id="planBtn" class="btn primary">Planla <span class="kbd">⌘↵</span></button>
+            </div>
+            <!-- Kadro: bu projede kim yönetir, kim kodlar, kim inceler. Klasör başına hatırlanır; varsayılanlar Ayarlar → Modeller. -->
+            <div class="stack-bar" id="stackBar">
+              <span class="stack-title" title="Bu projede kimin ne yapacağı. Seçim bu klasör için hatırlanır; varsayılanlar Ayarlar → Modeller'de.">Kadro</span>
+              <label><span>Yönetici</span><select id="stackManager" data-stack="managerBy" title="Ürün tanımı, plan onayı, son kabul ve teslim raporu"></select></label>
+              <label><span>Kodlayıcı</span><select id="stackCoder" data-stack="coder" title="Görevleri yazan ve düzelten ajan ve modeli; yerel model Codex'in Ollama / LM Studio yolu"></select></label>
+              <label><span>İnceleyici</span><select id="stackReviewer" data-stack="reviewerBy" title="Şartname, plan, brif ve incelemeleri yapan salt okunur oturumlar"></select></label>
+              <small class="hint" id="stackNote"></small>
             </div>
             <div class="drop-overlay">Dokümanları buraya bırakın</div>
           </div>
@@ -211,7 +215,7 @@
                 <div id="logFilters" class="filters">
                   <button class="filter active" data-f="all">Tümü</button>
                   <button class="filter" data-f="agent">Ajan</button>
-                  <button class="filter" data-f="gemini">Gemini</button>
+                  <button class="filter" data-f="manager">Yönetici</button>
                   <button class="filter" data-f="test">Test</button>
                   <button class="filter" data-f="problems">Sorunlar</button>
                 </div>
@@ -309,20 +313,309 @@
   </dialog>
 
   <!-- ============ Ayarlar ============ -->
-  <dialog id="settingsDialog" class="dialog">
+  <dialog id="settingsDialog" class="dialog settings">
     <form method="dialog" id="settingsForm">
       <div class="dialog-head">
-        <h3>Ayarlar</h3>
+        <div>
+          <h3>Ayarlar</h3>
+          <div class="dialog-sub" id="stackSummary" aria-live="polite"></div>
+        </div>
         <button value="cancel" class="icon-btn" aria-label="Kapat"><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg></button>
       </div>
-      <nav class="dtabs" id="settingsTabs">
-        <button type="button" class="dtab active" data-pane="general">Genel</button>
-        <button type="button" class="dtab" data-pane="agents">Ajanlar</button>
+      <nav class="dtabs" id="settingsTabs" aria-label="Ayar bölümleri">
+        <button type="button" class="dtab active" data-pane="models">Modeller</button>
+        <button type="button" class="dtab" data-pane="connections">Bağlantılar</button>
         <button type="button" class="dtab" data-pane="process">Süreç</button>
-        <button type="button" class="dtab" data-pane="standards">Standartlar</button>
+        <button type="button" class="dtab" data-pane="general">Genel</button>
       </nav>
       <div class="dialog-body">
-        <section class="dpane active" data-pane="general">
+
+        <!-- ===================== MODELLER: kim ne yapar ===================== -->
+        <section class="dpane active" data-pane="models">
+          <p class="pane-intro">Önce bir <b>hazır kurulum</b> seç; sonra gerekirse rolleri tek tek değiştir. Üç rol var: yönetici, kodlayıcı, planlayıcı/inceleyici. Buradaki seçimler <b>varsayılan</b>dır: yeni iş ekranındaki Kadro satırında proje başına değiştirilir ve o klasör için hatırlanır. Eksik anahtar ya da kurulum varsa aşağıda uyarı çıkar; anahtarlar ve bağlantılar <b>Bağlantılar</b> sekmesinde.</p>
+          <div class="preset-row" role="group" aria-label="Hazır kurulumlar">
+            <span class="hint">Hazır kurulum:</span>
+            <button type="button" class="btn sm" data-preset="claude" title="Yönetici, kodlayıcı ve inceleyici Claude Code aboneliğiyle çalışır; anahtar gerekmez">Hepsi Claude (önerilen)</button>
+            <button type="button" class="btn sm ghost" data-preset="opencode" title="Claude ürünü tanımlar, planlar ve inceler; OpenCode kodlar">Claude yönetir · OpenCode kodlar</button>
+            <button type="button" class="btn sm ghost" data-preset="allopencode" title="Claude Code olmadan: OpenCode yönetir, kodlar ve inceler (sağlayıcı anahtarları opencode auth login ile; ücretsiz modeller de olur)">Hepsi OpenCode</button>
+            <button type="button" class="btn sm ghost" data-preset="noclaude" title="Claude Code olmadan: NVIDIA NIM yönetir, OpenCode kodlar ve inceler">Claude'suz (NIM + OpenCode)</button>
+          </div>
+          <div id="modelsWarn" class="models-warn" hidden></div>
+
+          <div class="role-card">
+            <div class="role-head"><span class="role-no">1</span><div><b>Yönetici</b><small>Ürün tanımı, gereksinimler, plan onayı, son kabul ve teslim raporu. Küçük bir işte ~5 çağrı.</small></div></div>
+            <div class="grid2">
+              <label class="field"><span>Kim</span>
+                <select name="managerBy" id="managerBySel">
+                  <option value="claudecli">Claude — Claude Code aboneliği (anahtar gerekmez)</option>
+                  <option value="anthropic">Claude — API anahtarı</option>
+                  <option value="local">Yerel model — Ollama / LM Studio (bilgisayarda)</option>
+                  <option value="nim">NVIDIA NIM — harici API</option>
+                  <option value="opencode">OpenCode — kendi sağlayıcı anahtarlarıyla (NVIDIA, OpenAI, OpenRouter, ücretsiz…)</option>
+                </select>
+              </label>
+              <label class="field" data-manager="opencode" hidden><span>Model</span>
+                <div class="row"><input name="opencodeManagerModel" list="opencodeModelList" placeholder="sağlayıcı/model · boş = kodlayıcı OpenCode modeli" spellcheck="false" autocomplete="off" /><button type="button" class="btn ghost sm" data-load-opencode title="OpenCode'un gördüğü modelleri listele">Modelleri getir</button></div>
+              </label>
+              <label class="field" data-manager="claudecli"><span>Model</span>
+                <select id="managerClaudeModelSel" name="managerClaudeModel"></select>
+              </label>
+              <label class="field" data-manager="anthropic" hidden><span>Model</span>
+                <input name="anthropicModel" list="anthropicModelList" spellcheck="false" placeholder="claude-sonnet-5-5" />
+                <datalist id="anthropicModelList"></datalist>
+              </label>
+              <label class="field" data-manager="local" hidden><span>Model</span>
+                <select id="localModelSel" name="localModel"></select>
+              </label>
+              <label class="field" data-manager="nim" hidden><span>Model</span>
+                <select id="nimModelSel" name="nimModel"></select>
+              </label>
+            </div>
+            <small class="hint" id="managerHint"></small>
+          </div>
+
+          <div class="role-card">
+            <div class="role-head"><span class="role-no">2</span><div><b>Kodlayıcı</b><small>Görevleri yazar, düzeltmeleri yapar, TDD testlerini üretir. Yeni iş ekranındaki Kadro satırının varsayılanı; proje başına değiştirilebilir.</small></div></div>
+            <div class="grid2">
+              <label class="field"><span>Kim</span>
+                <select id="coderSel">
+                  <option value="claude">Claude Code — abonelik</option>
+                  <option value="codex:openai">Codex — OpenAI hesabı</option>
+                  <option value="codex:local">Codex — yerel model (Ollama / LM Studio)</option>
+                  <option value="codex:nim">Codex — NVIDIA NIM modeli</option>
+                  <option value="opencode">OpenCode — sağlayıcı/model (NVIDIA, OpenAI, OpenRouter, ücretsiz…)</option>
+                </select>
+                <input type="hidden" name="defaultAgent" />
+                <input type="hidden" name="codexProvider" />
+              </label>
+              <label class="field" data-coder="claude"><span>Model</span>
+                <select id="claudeModelSel" aria-describedby="coderHint"></select>
+                <input type="hidden" name="claudeModel" />
+              </label>
+              <label class="field" id="claudeModelCustomField" data-coder="claude" hidden><span>Özel model kimliği</span><input id="claudeModelCustom" placeholder="ör. claude-opus-5-5" spellcheck="false" autocomplete="off" /></label>
+              <label class="field" data-coder="codex:openai codex:local" hidden><span>Model</span>
+                <input name="codexModel" list="localModelList" placeholder="ör. qwen3-coder:30b · boş = varsayılan" spellcheck="false" autocomplete="off" />
+                <!-- Yerel sunucudan getirilen modeller öneri olarak açılır (Bağlantılar → Yerel model sunucusu → Modelleri getir). -->
+                <datalist id="localModelList"></datalist>
+              </label>
+              <label class="field" data-coder="codex:nim" hidden><span>Model</span>
+                <select name="nimCoderModel" data-nim-role></select>
+              </label>
+              <label class="field" data-coder="opencode" hidden><span>Model</span>
+                <div class="row"><input name="opencodeModel" list="opencodeModelList" placeholder="sağlayıcı/model · boş = OpenCode varsayılanı" spellcheck="false" autocomplete="off" /><button type="button" class="btn ghost sm" data-load-opencode title="OpenCode'un gördüğü modelleri listele">Modelleri getir</button></div>
+                <datalist id="opencodeModelList"></datalist>
+              </label>
+            </div>
+            <small class="hint" id="coderHint"></small>
+          </div>
+
+          <div class="role-card">
+            <div class="role-head"><span class="role-no">3</span><div><b>Planlayıcı ve inceleyici</b><small>Salt okunur oturumlar: şartname ve görev planı, görev öncesi brif, ilk inceleme, derin inceleme, uzman paneli, bulgu doğrulama, proje hafızası.</small></div></div>
+            <div class="grid2">
+              <label class="field"><span>Kim</span>
+                <select name="reviewerBy" id="reviewerBySel">
+                  <option value="auto">Claude Code — kuruluysa (önerilen; Codex ile kodlanan işte çapraz inceleme)</option>
+                  <option value="agent">Kodlayıcıyla aynı ajan — Claude'suz çalışma</option>
+                </select>
+              </label>
+            </div>
+            <div class="role-models" data-stack="claude">
+              <div class="role-models-head">Claude rolleri <small>boş = Claude modeli</small></div>
+              <div class="grid2">
+                <!-- Kodlayıcı Claude değilken (Codex / OpenCode kodlarken) Claude rollerinin temel modeli burada seçilir;
+                     kodlayıcı Claude ise Kodlayıcı kartındaki model zaten temeldir ve bu alan gizlenir. -->
+                <label class="field" id="claudeBaseField" hidden><span>Claude modeli (tüm roller)</span><select id="claudeBaseSel"></select></label>
+                <label class="field"><span>Planlayıcı</span><select name="plannerModel" data-role-model></select></label>
+                <label class="field"><span>İnceleyici</span><select name="reviewerModel" data-role-model></select></label>
+                <label class="field"><span>Brif</span><select name="briefModel" data-role-model data-role-default="brief"></select></label>
+              </div>
+            </div>
+            <div class="role-models" data-stack="opencode" hidden>
+              <div class="role-models-head">OpenCode inceleyici modeli <small>boş = kodlayıcı modeli · salt okunur "plan" ajanıyla çalışır</small></div>
+              <div class="grid2">
+                <label class="field"><span>Planlayıcı, inceleyici ve brif</span><div class="row"><input name="opencodeReviewModel" list="opencodeModelList" placeholder="sağlayıcı/model · boş = kodlayıcı modeli" spellcheck="false" autocomplete="off" /><button type="button" class="btn ghost sm" data-load-opencode>Modelleri getir</button></div></label>
+              </div>
+            </div>
+            <div class="role-models" data-stack="nim" hidden>
+              <div class="role-models-head">NIM rolleri <small>boş = yöneticinin NIM modeli</small></div>
+              <div class="grid2">
+                <label class="field"><span>Planlayıcı</span><select name="nimPlannerModel" data-nim-role></select></label>
+                <label class="field"><span>İnceleyici ve brif</span><select name="nimReviewerModel" data-nim-role></select></label>
+              </div>
+            </div>
+            <small class="hint" id="reviewerHint"></small>
+          </div>
+        </section>
+
+        <!-- ===================== BAĞLANTILAR: hesaplar, anahtarlar, sunucular ===================== -->
+        <section class="dpane" data-pane="connections">
+          <p class="pane-intro">Hesaplar, anahtarlar ve sunucular. Anahtarlar işletim sisteminin anahtar zincirinde şifreli saklanır; ajanların ortamına geçmez.</p>
+
+          <fieldset>
+            <legend>Claude Code</legend>
+            <div id="agentDetect" class="agent-detect"></div>
+            <details class="fold adv">
+              <summary>Gelişmiş</summary>
+              <div class="grid2">
+                <label class="field"><span>Düşünme seviyesi</span>
+                  <select name="claudeEffort"><option value="">varsayılan</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option><option value="max">max</option></select>
+                </label>
+                <label class="field"><span>Yetki modu</span>
+                  <select name="claudePermission"><option value="full">Tam otomatik (önerilen)</option><option value="safe">Güvenli (yalnızca geliştirme komutları)</option></select>
+                </label>
+                <label class="field"><span>CLI yolu</span><input name="claudePath" placeholder="otomatik bul" spellcheck="false" /></label>
+              </div>
+              <label class="check"><input type="checkbox" name="claudeAllowMcp" /> <span>MCP ve hesap bağlayıcıları <small class="hint">Kapalı önerilir: ajan Vercel, Slack gibi araçları onaysız kullanır ve her oturuma ~260K token ekler.</small></span></label>
+              <label class="check"><input type="checkbox" name="claudeUserSettings" /> <span>Kişisel Claude Code ayarlarını yükle <small class="hint">Kapalı önerilir: ~/.claude altındaki CLAUDE.md, hafıza, eklenti ve hook'lar ajan oturumlarına girmez; yalnızca projenin CLAUDE.md'si yüklenir.</small></span></label>
+              <small class="hint warn-hint">Tam otomatik: ajan onay sormadan komut çalıştırır; yalnızca güvendiğin klasörlerde.</small>
+            </details>
+          </fieldset>
+
+          <fieldset>
+            <legend>Codex</legend>
+            <div id="codexDetect" class="agent-detect"></div>
+            <details class="fold adv">
+              <summary>Gelişmiş</summary>
+              <div class="grid2">
+                <label class="field"><span>Yetki modu</span>
+                  <select name="codexPermission"><option value="full">Tam otomatik (önerilen)</option><option value="safe">Sandbox (full-auto + ağ)</option></select>
+                </label>
+                <label class="field"><span>CLI yolu</span><input name="codexPath" placeholder="otomatik bul" spellcheck="false" /></label>
+                <label class="field"><span>Yerel sunucu (yerel modelde)</span>
+                  <select name="codexLocalProvider"><option value="ollama">Ollama (localhost:11434)</option><option value="lmstudio">LM Studio (localhost:1234)</option></select>
+                </label>
+              </div>
+            </details>
+          </fieldset>
+
+          <fieldset>
+            <legend>OpenCode <small class="legend-sub">açık kaynak ajan · sağlayıcı anahtarları opencode auth login ile</small></legend>
+            <div id="opencodeDetect" class="agent-detect"></div>
+            <div class="row actions">
+              <button type="button" id="loadOpencodeModelsBtn" class="btn sm">Modelleri getir</button>
+              <small class="hint" id="opencodeModelHint">Liste Modeller → Kodlayıcı → OpenCode model alanında öneri olarak açılır (ör. nvidia/deepseek-ai/deepseek-v4-pro, opencode/big-pickle).</small>
+            </div>
+            <details class="fold adv">
+              <summary>Gelişmiş</summary>
+              <div class="grid2">
+                <label class="field"><span>CLI yolu</span><input name="opencodePath" placeholder="otomatik bul" spellcheck="false" /></label>
+              </div>
+            </details>
+          </fieldset>
+          <fieldset>
+            <legend>Yerel model sunucusu <small class="legend-sub">Ollama · LM Studio · llama.cpp — veri bilgisayardan çıkmaz</small></legend>
+            <div class="grid2">
+              <label class="field"><span>Adres (OpenAI uyumlu)</span><input name="localBaseUrl" placeholder="http://localhost:11434/v1" spellcheck="false" autocomplete="off" /></label>
+              <label class="field"><span>Anahtar <small class="hint">yalnızca sunucu istiyorsa</small></span>
+                <div class="row"><input type="password" name="localApiKey" autocomplete="off" spellcheck="false" /><button type="button" id="clearLocalKeyBtn" class="btn ghost sm">Sil</button></div>
+              </label>
+            </div>
+            <div class="row actions">
+              <button type="button" id="loadLocalModelsBtn" class="btn sm">Modelleri getir</button>
+              <label class="field inline"><span>Model</span><select id="localModelPick" title="Yönetici için yerel model; Modeller → Yönetici'deki seçimle aynıdır"></select></label>
+              <button type="button" id="testLocalBtn" class="btn sm ghost">Test et</button>
+              <small class="hint" id="localModelHint"></small>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>NVIDIA NIM <small class="legend-sub">harici API · başka bir OpenAI uyumlu API için adresi değiştir</small></legend>
+            <div class="grid2">
+              <label class="field"><span>API anahtarı <a href="#" data-href="https://build.nvidia.com/settings/api-keys" class="ext">anahtar al ↗</a></span>
+                <div class="row"><input type="password" name="nimApiKey" autocomplete="off" spellcheck="false" /><button type="button" id="clearNimKeyBtn" class="btn ghost sm">Sil</button></div>
+              </label>
+              <label class="field"><span>Adres</span><input name="nimBaseUrl" placeholder="https://integrate.api.nvidia.com/v1" spellcheck="false" autocomplete="off" /></label>
+            </div>
+            <div class="row actions">
+              <button type="button" id="loadNimModelsBtn" class="btn sm">Modelleri getir</button>
+              <label class="field inline"><span>Model</span><select id="nimModelPick" title="Yönetici için NIM modeli; Modeller → Yönetici'deki seçimle aynıdır"></select></label>
+              <button type="button" id="testNimBtn" class="btn sm ghost">Test et</button>
+              <small class="hint" id="nimModelHint"></small>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Claude API <small class="legend-sub">yalnızca yönetici "Claude — API anahtarı" seçiliyse gerekir</small></legend>
+            <div class="grid2">
+              <label class="field"><span>API anahtarı <a href="#" data-href="https://console.anthropic.com/settings/keys" class="ext">anahtar al ↗</a></span>
+                <div class="row"><input type="password" name="anthropicKey" id="anthropicKeyInput" autocomplete="off" spellcheck="false" /><button type="button" id="clearAnthropicKeyBtn" class="btn ghost sm">Sil</button></div>
+              </label>
+            </div>
+            <div class="row actions">
+              <button type="button" id="loadAnthropicModelsBtn" class="btn sm">Modelleri getir</button>
+              <button type="button" id="testAnthropicBtn" class="btn sm ghost">Test et</button>
+              <small id="anthropicKeyHint" class="hint"></small>
+            </div>
+          </fieldset>
+        </section>
+
+        <!-- ===================== SÜREÇ ===================== -->
+        <section class="dpane" data-pane="process">
+          <p class="pane-intro">İşin nasıl yürüyeceği: plan, inceleme derinliği, kalite kapıları ve sınırlar.</p>
+          <fieldset>
+            <legend>Planlama ve inceleme</legend>
+            <div class="grid2">
+              <label class="field"><span>Planı kim yazsın</span>
+                <select name="planner">
+                  <option value="claude">İnceleyici ajan yazar, yönetici onaylar (önerilen)</option>
+                  <option value="manager">Yönetici yazar, inceleyici ajan eleştirir (daha hızlı)</option>
+                </select>
+              </label>
+              <label class="field"><span>İnceleme gücü</span>
+                <select name="reviewLevel">
+                  <option value="standard">Standart — her görev bir kez incelenir (en hızlı)</option>
+                  <option value="deep">Derin — uzman paneli + bulgu doğrulama (önerilen)</option>
+                  <option value="max">Maksimum — her görevde mimari/test uzmanı da</option>
+                </select>
+                <small class="hint" id="reviewLevelHint"></small>
+              </label>
+              <label class="field"><span>Yöneticinin rolü</span>
+                <select name="managerRole">
+                  <option value="manager">Yalnızca baş ve son — plan onayı ve teslim (önerilen)</option>
+                  <option value="full">Her adımda — her görevi ve fazı da inceler</option>
+                </select>
+              </label>
+              <label class="field"><span>Teknik brif (Claude inceleyiciyken)</span>
+                <select name="briefBy">
+                  <option value="fable">Claude Fable 5.1 — kodu gezerek yazar (önerilen)</option>
+                  <option value="coder">Kodlayıcı modeliyle</option>
+                </select>
+              </label>
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>Kalite</legend>
+            <div class="grid2 checks">
+              <label class="check"><input type="checkbox" name="verifyEachTask" /> <span>Her görevden sonra build, lint, test ve inceleme</span></label>
+              <label class="check"><input type="checkbox" name="visualTest" /> <span>Uygulamayı çalıştırıp sayfaları gez, ekran görüntüsü al</span></label>
+              <label class="check"><input type="checkbox" name="freshCloneCheck" /> <span>Temiz kurulum denetimi (yeni klon)</span></label>
+              <label class="check" data-deep-only><input type="checkbox" name="reviewPanel" /> <span>Uzman denetim paneli</span></label>
+              <label class="check" data-deep-only><input type="checkbox" name="independentAudit" /> <span>Bağımsız denetim (birkaç görevde bir tüm kod)</span></label>
+              <label class="check"><input type="checkbox" name="securityReview" /> <span>Bağımlılık güvenlik taraması</span></label>
+              <label class="check"><input type="checkbox" name="taskBriefing" /> <span>Her görevden önce teknik brif</span></label>
+              <label class="check"><input type="checkbox" name="planSelfReview" /> <span>Yönetici planı ikinci kez denetlesin</span></label>
+              <label class="check"><input type="checkbox" name="tddMode" /> <span>TDD modu (önce test, sonra kod)</span></label>
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>Akış ve sınırlar</legend>
+            <div class="grid2 checks">
+              <label class="check"><input type="checkbox" name="gitCommit" /> <span>Her görevden sonra git commit</span></label>
+              <label class="check"><input type="checkbox" name="strictPhaseGates" /> <span>Faz kapısı geçilemezse dur ve beni bekle</span></label>
+              <label class="check"><input type="checkbox" name="autoApprove" /> <span>Planı onay beklemeden başlat</span></label>
+            </div>
+            <div class="grid3">
+              <label class="field"><span>Görev başına düzeltme turu</span><input type="number" name="maxFixAttempts" min="0" max="5" /></label>
+              <label class="field"><span>Son kabulde düzeltme turu</span><input type="number" name="finalFixAttempts" min="0" max="6" /></label>
+              <label class="field"><span>Ajan zaman aşımı (dk)</span><input type="number" name="agentTimeoutMin" min="5" max="240" /></label>
+              <label class="field"><span>Aynı anda çalışan iş</span><input type="number" name="maxParallelJobs" min="1" max="6" /></label>
+              <label class="field"><span>Denetim aralığı (görev)</span><input type="number" name="auditEvery" min="1" max="10" /></label>
+            </div>
+          </fieldset>
+        </section>
+
+        <!-- ===================== GENEL ===================== -->
+        <section class="dpane" data-pane="general">
           <fieldset>
             <legend>Görünüm</legend>
             <div class="segmented wide" id="themeSeg" role="radiogroup" aria-label="Tema">
@@ -333,159 +626,14 @@
             <input type="hidden" name="theme" />
           </fieldset>
           <fieldset>
-            <legend>Yönetici</legend>
-            <label class="field"><span>Ürün tanımı, plan onayı, son kabul ve rapor</span>
-              <select name="managerBy" id="managerBySel">
-                <option value="gemini">Gemini</option>
-                <option value="anthropic">Claude (API anahtarı)</option>
-              </select>
-            </label>
-          </fieldset>
-          <fieldset id="geminiFieldset">
-            <legend>Gemini</legend>
-            <label class="field">
-              <span>API anahtarı <a href="#" data-href="https://aistudio.google.com/apikey" class="ext">anahtar al ↗</a></span>
-              <div class="row">
-                <input type="password" name="geminiKey" id="geminiKeyInput" autocomplete="off" spellcheck="false" />
-                <button type="button" id="clearKeyBtn" class="btn ghost sm">Sil</button>
-              </div>
-              <small id="keyHint" class="hint"></small>
-            </label>
-            <label class="field">
-              <span>Model</span>
-              <div class="row">
-                <input name="geminiModel" list="modelList" spellcheck="false" />
-                <datalist id="modelList"></datalist>
-                <button type="button" id="loadModelsBtn" class="btn ghost sm">Modelleri getir</button>
-                <button type="button" id="testGeminiBtn" class="btn ghost sm">Test et</button>
-              </div>
-            </label>
-          </fieldset>
-          <fieldset id="anthropicFieldset" hidden>
-            <legend>Claude API</legend>
-            <label class="field">
-              <span>API anahtarı <a href="#" data-href="https://console.anthropic.com/settings/keys" class="ext">anahtar al ↗</a></span>
-              <div class="row">
-                <input type="password" name="anthropicKey" id="anthropicKeyInput" autocomplete="off" spellcheck="false" />
-                <button type="button" id="clearAnthropicKeyBtn" class="btn ghost sm">Sil</button>
-              </div>
-              <small id="anthropicKeyHint" class="hint"></small>
-            </label>
-            <label class="field">
-              <span>Model</span>
-              <div class="row">
-                <input name="anthropicModel" list="anthropicModelList" spellcheck="false" />
-                <datalist id="anthropicModelList"></datalist>
-                <button type="button" id="loadAnthropicModelsBtn" class="btn ghost sm">Modelleri getir</button>
-                <button type="button" id="testAnthropicBtn" class="btn ghost sm">Test et</button>
-              </div>
-            </label>
-          </fieldset>
-        </section>
-
-        <section class="dpane" data-pane="agents">
-          <fieldset>
-            <legend>Bağlantılar</legend>
-            <div id="agentDetect" class="agent-detect"></div>
-          </fieldset>
-          <fieldset>
-            <legend>Claude Code</legend>
-            <div class="grid2">
-              <label class="field"><span>Model</span>
-                <select id="claudeModelSel" aria-describedby="claudeModelHint"></select>
-                <input type="hidden" name="claudeModel" />
-              </label>
-              <label class="field" id="claudeModelCustomField" hidden><span>Özel model kimliği</span><input id="claudeModelCustom" placeholder="ör. claude-opus-5-5" spellcheck="false" autocomplete="off" /></label>
-              <label class="field"><span>Düşünme seviyesi</span>
-                <select name="claudeEffort"><option value="">varsayılan</option><option value="medium">medium</option><option value="high">high</option><option value="xhigh">xhigh</option><option value="max">max</option></select>
-              </label>
-              <label class="field"><span>Yetki modu</span>
-                <select name="claudePermission"><option value="full">Tam otomatik (önerilen)</option><option value="safe">Güvenli (yalnızca geliştirme komutları)</option></select>
-              </label>
-              <label class="field"><span>CLI yolu</span><input name="claudePath" placeholder="otomatik bul" spellcheck="false" /></label>
-            </div>
-            <small class="hint" id="claudeModelHint"></small>
-            <label class="check"><input type="checkbox" name="claudeAllowMcp" /> <span>MCP ve hesap bağlayıcıları <small class="hint">Kapalı önerilir: ajan Vercel, Slack gibi araçları onaysız kullanır ve her oturuma ~260K token ekler.</small></span></label>
-          </fieldset>
-          <fieldset>
-            <legend>Codex</legend>
-            <div class="grid2">
-              <label class="field"><span>Model</span><input name="codexModel" placeholder="varsayılan" /></label>
-              <label class="field"><span>Yetki modu</span>
-                <select name="codexPermission"><option value="full">Tam otomatik (önerilen)</option><option value="safe">Sandbox (full-auto + ağ)</option></select>
-              </label>
-              <label class="field"><span>CLI yolu</span><input name="codexPath" placeholder="otomatik bul" spellcheck="false" /></label>
-            </div>
-          </fieldset>
-          <small class="hint warn-hint">Tam otomatik: ajan onay sormadan komut çalıştırır; yalnızca güvendiğin klasörlerde.</small>
-        </section>
-
-        <section class="dpane" data-pane="process">
-          <fieldset>
-            <legend>Planlama ve inceleme</legend>
-            <label class="field"><span>Planı kim yazsın</span>
-              <select name="planner">
-                <option value="claude">Claude yazar, yönetici onaylar (önerilen)</option>
-                <option value="gemini">Yönetici yazar, Claude eleştirir (daha hızlı)</option>
-              </select>
-            </label>
-            <label class="field"><span>İnceleme gücü</span>
-              <select name="reviewLevel">
-                <option value="standard">Standart — her görev bir kez incelenir (en hızlı)</option>
-                <option value="deep">Derin — uzman paneli, bulgu doğrulama, faz kapısı ve teslimde derin inceleme (önerilen)</option>
-                <option value="max">Maksimum — her görevde mimari/test uzmanı da (en yavaş)</option>
-              </select>
-            </label>
-            <label class="field"><span>Yöneticinin rolü</span>
-              <select name="geminiRole">
-                <option value="manager">Yönetici — ürün tanımı, plan onayı ve teslim (önerilen)</option>
-                <option value="full">Her adımda — her görevi ve fazı da inceler, hafızayı yazar</option>
-              </select>
-            </label>
-            <label class="field"><span>Teknik brif</span>
-              <select name="briefBy">
-                <option value="fable">Claude Fable 5.1 — kodu gezerek yazar (önerilen)</option>
-                <option value="coder">Claude — kodlama modeliyle</option>
-                <option value="gemini">Yönetici (Gemini ya da Claude API)</option>
-              </select>
-            </label>
-          </fieldset>
-          <fieldset>
-            <legend>Kalite</legend>
-            <label class="check"><input type="checkbox" name="verifyEachTask" /> <span>Her görevden sonra build, lint ve test çalıştır, kod incelensin</span></label>
-            <label class="check"><input type="checkbox" name="visualTest" /> <span>Uygulamayı çalıştırıp sayfaları gez ve ekran görüntüsü al</span></label>
-            <label class="check"><input type="checkbox" name="freshCloneCheck" /> <span>Temiz kurulum denetimi</span></label>
-            <label class="check"><input type="checkbox" name="reviewPanel" /> <span>Uzman denetim paneli</span></label>
-            <label class="check"><input type="checkbox" name="independentAudit" /> <span title="Claude birkaç görevde bir bitmiş kodun tamamını kalan görevlerle birlikte denetler; doğrulanan önerileri sonraki görevden önce uygulatır">Bağımsız denetim</span></label>
-            <label class="check"><input type="checkbox" name="securityReview" /> <span>Bağımlılık güvenlik taraması ve (panel kapalıyken) güvenlik denetimi</span></label>
-            <label class="check"><input type="checkbox" name="taskBriefing" /> <span>Her görevden önce teknik brif yazılsın</span></label>
-            <label class="check"><input type="checkbox" name="planSelfReview" /> <span>Yönetici planı ikinci kez denetlesin</span></label>
-            <label class="check"><input type="checkbox" name="tddMode" /> <span>TDD modu</span></label>
-          </fieldset>
-          <fieldset>
-            <legend>Akış</legend>
-            <label class="check"><input type="checkbox" name="gitCommit" /> <span>Her görevden sonra git commit at</span></label>
-            <label class="check"><input type="checkbox" name="strictPhaseGates" /> <span>Faz kapısı geçilemezse dur ve beni bekle</span></label>
-            <label class="check"><input type="checkbox" name="autoApprove" /> <span>Planı onay beklemeden başlat</span></label>
-            <div class="grid3">
-              <label class="field"><span>Görev başına düzeltme turu</span><input type="number" name="maxFixAttempts" min="0" max="5" /></label>
-              <label class="field"><span>Son kabulde düzeltme turu</span><input type="number" name="finalFixAttempts" min="0" max="6" /></label>
-              <label class="field"><span>Ajan zaman aşımı (dk)</span><input type="number" name="agentTimeoutMin" min="5" max="240" /></label>
-              <label class="field"><span title="Her iş kendi ajan oturumunda, ayrı klasörde çalışır">Aynı anda çalışan iş</span><input type="number" name="maxParallelJobs" min="1" max="6" /></label>
-              <label class="field"><span title="Bağımsız denetim kaç görevde bir yapılsın">Denetim aralığı (görev)</span><input type="number" name="auditEvery" min="1" max="10" /></label>
-            </div>
-          </fieldset>
-        </section>
-
-        <section class="dpane" data-pane="standards">
-          <fieldset>
-            <legend>Mühendislik standartları</legend>
-            <textarea name="standards" id="standardsInput" rows="16" spellcheck="false"></textarea>
+            <legend>Mühendislik standartları <small class="legend-sub">her ajan istemine eklenir, incelemede ölçüt olur</small></legend>
+            <textarea name="standards" id="standardsInput" rows="14" spellcheck="false"></textarea>
             <div><button type="button" id="resetStandardsBtn" class="btn ghost sm">Varsayılana dön</button></div>
           </fieldset>
         </section>
       </div>
       <div class="dialog-foot">
+        <small class="hint" id="settingsFootHint"></small>
         <div class="spacer"></div>
         <button value="cancel" class="btn ghost">Vazgeç</button>
         <button id="saveSettingsBtn" value="save" class="btn primary">Kaydet</button>

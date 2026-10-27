@@ -18,7 +18,7 @@ const { SEVERE } = require('./shared');
 const finishing = (t) => (t.status === 'done' || t.status === 'failed') && t.step === 'finishing';
 
 // Hafıza oturumuna giden fark üst sınırı: ajan değişen dosyaları kendisi okur; tüm farkı isteme koymak her görevde
-// on binlerce token ekliyordu. (Gemini'nin yazdığı hafıza dosya okuyamadığı için tüm farkı almaya devam eder.)
+// on binlerce token ekliyordu. (Yöneticinin yazdığı hafıza dosya okuyamadığı için tüm farkı almaya devam eder.)
 const MEMORY_DIFF_CHARS = 30000;
 const clipDiff = (text, max) => {
   const t = String(text || '');
@@ -31,7 +31,7 @@ class Pipeline {
     if (this.running || !this.job?.plan || this.job.phase !== 'incomplete') throw new Error('Devam ettirilecek son kabul yok.');
     this.update({ error: null, errorKind: null });
     this.guarded(async () => {
-      const s = settings.get();
+      const s = this.cfg();
       this.useGit = s.gitCommit ? await project.ensureRepo(this.job.projectDir) : false;
       this.log('system', 'step', 'Son kabul yeniden başlatıldı: açık sorunlar düzeltilecek.');
       await this.finalStage(s);
@@ -66,7 +66,7 @@ class Pipeline {
   // ---------- yürütme ----------
   async pipeline() {
     const job = this.job;
-    const s = settings.get();
+    const s = this.cfg();
     const dir = job.projectDir;
     this.update({ phase: 'running', startedAt: job.startedAt || Date.now(), error: null });
     this.log('system', 'step', `Yürütme başladı · ajan: ${agents.ADAPTERS[job.agent].label}${this.modelNote(s)}`);
@@ -171,7 +171,7 @@ class Pipeline {
     const dir = this.job.projectDir;
     const log = (l) => this.log('test', l.lvl, l.text);
     const checks = await this.checksOnline(() => verify.runChecks({ dir, full: true, extraCommands: v.commands, setupCommands: v.setup, log, signal: this.signal }));
-    if (fresh && settings.get().freshCloneCheck !== false && this.useGit && !this.signal?.aborted && !checks.some((c) => !c.ok && !c.env)) {
+    if (fresh && this.cfg().freshCloneCheck !== false && this.useGit && !this.signal?.aborted && !checks.some((c) => !c.ok && !c.env)) {
       this.log('test', 'step', 'Temiz kurulum denetimi: proje yeni bir klonda sıfırdan kurulup test ediliyor…');
       const fc = await this.checksOnline(() => verify.freshCloneCheck({ dir, log, signal: this.signal }));
       if (fc) checks.push(fc);
@@ -204,7 +204,7 @@ class Pipeline {
       openNow.length ? this.recheckFindings(openNow, label) : Promise.resolve(null),
     ]));
     const raw = managerLeads ? first : deep ? this.neutralReview(deep) : await this.reviewFallback(manager, checks);
-    const src = !managerLeads && deep ? 'review' : 'gemini';
+    const src = !managerLeads && deep ? 'review' : 'manager';
     const review = await this.settleRound({
       raw,
       checks,
@@ -244,10 +244,10 @@ class Pipeline {
       freshFailed = checks.some((c) => c.fresh && !c.ok && !c.env);
       const smoke = await this.runBrowserTest(s, `g${gateNo}-${attempt}`, checks);
       this.update({ phase: 'reviewing' });
-      // Gemini "yönetici" rolündeyken faz kapısını ajanlar yürütür (derin inceleme + uzman paneli); Gemini yalnızca
+      // Yönetici rolü "manager" iken faz kapısını ajanlar yürütür (derin inceleme + uzman paneli); yönetici yalnızca
       // ajan incelemesi sonuç vermezse devreye girer.
       const byAgent = this.agentsLead(s) && s.reviewLevel !== 'standard';
-      if (!byAgent) this.log('gemini', 'info', `Gemini "${phaseName}" fazını bütün olarak inceliyor…`);
+      if (!byAgent) this.log('manager', 'info', `Yönetici "${phaseName}" fazını bütün olarak inceliyor…`);
       const diff = this.useGit ? await project.diffSince(dir, job.phaseStart[phaseName] || null, 200000) : null;
       const snapshot = this.useGit ? await project.sourceSnapshot(dir, { priority: await project.changedFiles(dir, job.phaseStart[phaseName] || null), budget: 450000 }) : null;
       const phaseTasks = job.tasks.filter((t) => t.phase === phaseName && t.status !== 'skipped');
@@ -255,15 +255,15 @@ class Pipeline {
       const installed = project.installedVersions(dir);
       // Uzman paneli ilk turda çalışır; panel açıkken güvenlik denetimini Claude'un güvenlik uzmanı yapar.
       const panelOn = deepOn && s.reviewPanel !== false;
-      const geminiGate = () => this.gem({ system: P.phaseReviewSystem(lang, phaseName), parts: P.finalReviewParts({ job, checks, smoke, diff, phase: phaseName, snapshot, installed }), schema: P.REVIEW_SCHEMA, temperature: 0.2, maxOutputTokens: 32768 });
+      const managerGate = () => this.gem({ system: P.phaseReviewSystem(lang, phaseName), parts: P.finalReviewParts({ job, checks, smoke, diff, phase: phaseName, snapshot, installed }), schema: P.REVIEW_SCHEMA, temperature: 0.2, maxOutputTokens: 32768 });
       const round = await this.reviewRound({
         attempt,
         checks,
         smoke,
         prevDeep,
         deepOn,
-        manager: geminiGate,
-        // Ajanların yürüttüğü kapıda karar derin incelemeden gelir; o da yoksa Gemini'ye düşülür.
+        manager: managerGate,
+        // Ajanların yürüttüğü kapıda karar derin incelemeden gelir; o da yoksa yöneticiye düşülür.
         managerLeads: !byAgent,
         security: panelOn ? null : () => this.securityAudit(diff, `faz "${phaseName}"`),
         deep: { scope: `phase "${phaseName}"`, tasks: phaseTasks, reqIds: [...new Set(phaseTasks.flatMap((t) => t.covers || []))] },
@@ -281,7 +281,7 @@ class Pipeline {
       const secOk = !(review.security || []).some((f) => ['critical', 'high'].includes(f.severity));
       if (review.verdict === 'fix' && deep && !this.deepBlocking(deep).length && deep.verdict !== 'fix' && checksOk && secOk && !review.panel?.blocking && !(review.openFindings || []).length && !this.smokeIssues(smoke).length) {
         job.carryOver = [...(job.carryOver || []), ...review.issues.map((i) => `Faz "${phaseName}" incelemesinden (doğrula, geçerliyse düzelt): ${i}`)].slice(-30);
-        this.log('system', 'info', `Kontroller geçti ve derin inceleme onayladı: ${reviewSrc === 'gemini' ? 'Gemini\'nin' : 'incelemenin'} ${review.issues.length} notu düzeltme turu açılmadan sonraki görevlere ve son kabule aktarıldı.`);
+        this.log('system', 'info', `Kontroller geçti ve derin inceleme onayladı: ${reviewSrc === 'manager' ? 'yöneticinin' : 'incelemenin'} ${review.issues.length} notu düzeltme turu açılmadan sonraki görevlere ve son kabule aktarıldı.`);
         review.deferred = review.issues;
         review.issues = [];
         review.verdict = 'pass';
@@ -317,7 +317,7 @@ ${(review.issues || []).map((i) => `- Açık: ${i}`).join('\n')}`);
     }
   }
 
-  // Hafızayı ajan günceller (Gemini "yönetici" rolündeyken): farkı ve dosyaları kendisi okur. Dönen: { memory, carryOver, lessons } | null
+  // Hafızayı ajan günceller (yönetici rolü "manager" iken): farkı ve dosyaları kendisi okur. Dönen: { memory, carryOver, lessons } | null
   async agentMemory(task, diff) {
     const rid = this.reviewerId();
     if (!rid) return null;
@@ -338,16 +338,16 @@ ${(review.issues || []).map((i) => `- Açık: ${i}`).join('\n')}`);
   async remember(task, heading) {
     const job = this.job;
     const dir = job.projectDir;
-    const s = settings.get();
+    const s = this.cfg();
     const diff = this.useGit ? await project.diffSince(dir, task.baseCommit || null, 150000) : null;
     this.checkAbort();
     const byAgent = this.agentsLead(s);
-    const who = byAgent ? agents.ADAPTERS[this.reviewerId()].label : 'Gemini';
-    const src = byAgent ? 'review' : 'gemini';
+    const who = byAgent ? agents.ADAPTERS[this.reviewerId()].label : 'Yönetici';
+    const src = byAgent ? 'review' : 'manager';
     this.log(src, 'info', `${who} proje hafızasını güncelliyor…`);
     try {
-      const viaGemini = () => this.gem({ system: P.MEMORY_SYSTEM, parts: [{ text: P.memoryUserText({ job, task, diff }) }], schema: P.MEMORY_SCHEMA, temperature: 0.2 });
-      const r = byAgent ? (await this.agentMemory(task, diff)) || (settings.managerReady(settings.get()) ? await viaGemini() : null) : await viaGemini();
+      const viaManager = () => this.gem({ system: P.MEMORY_SYSTEM, parts: [{ text: P.memoryUserText({ job, task, diff }) }], schema: P.MEMORY_SCHEMA, temperature: 0.2 });
+      const r = byAgent ? (await this.agentMemory(task, diff)) || (settings.managerReady(this.cfg()) ? await viaManager() : null) : await viaManager();
       if (r?.memory?.trim()) {
         job.memory = r.memory.trim();
         job.carryOver = (r.carryOver || []).filter(Boolean).slice(0, 30);
@@ -402,7 +402,7 @@ ${diff?.stat ? `### Değişen dosyalar\n\`\`\`\n${diff.stat}\n\`\`\`` : ''}`);
       smoke = await this.runBrowserTest(s, `f-${attempt}`, checks);
 
       this.update({ phase: 'reviewing' });
-      this.log('gemini', 'info', 'Gemini tüm projeyi, test sonuçlarını ve ekran görüntülerini inceliyor…');
+      this.log('manager', 'info', 'Yönetici tüm projeyi, test sonuçlarını ve ekran görüntülerini inceliyor…');
       const diff = this.useGit ? await project.diffSince(dir, job.baseCommit, 250000) : null;
       const snapshot = this.useGit ? await project.sourceSnapshot(dir, { budget: 500000 }) : null;
       const notMet = (job.plan.requirements || []).map((r) => r.id).filter((id) => (job.reqStatus || {})[id] !== 'met');
@@ -455,14 +455,14 @@ ${diff?.stat ? `### Değişen dosyalar\n\`\`\`\n${diff.stat}\n\`\`\`` : ''}`);
     }
 
     this.update({ phase: 'reporting' });
-    this.log('gemini', 'info', 'Teslim raporu yazılıyor…');
-    // Rapor bir özet belgesidir: Gemini'ye ulaşılamazsa saatler süren iş "hata" ile bitmez, özet Sonda'dan çıkar.
+    this.log('manager', 'info', 'Teslim raporu yazılıyor…');
+    // Rapor bir özet belgesidir: yöneticiye ulaşılamazsa saatler süren iş "hata" ile bitmez, özet Sonda'dan çıkar.
     let report;
     try {
       report = await this.gem({ system: P.reportSystem(this.userLang()), parts: [{ text: P.reportUserText({ job, checks, smoke, finalReview: review }) }], temperature: 0.3 });
     } catch (e) {
       this.checkAbort();
-      this.log('gemini', 'warn', `Teslim raporu Gemini ile yazılamadı (${e.message}); özet rapor eldeki sonuçlardan oluşturuldu.`);
+      this.log('manager', 'warn', `Teslim raporu yönetici ile yazılamadı (${e.message}); özet rapor eldeki sonuçlardan oluşturuldu.`);
       report = this.fallbackReport(review, checks, smoke);
     }
     docs.appendProgress(dir, `## ${review.verdict === 'pass' ? '✓' : '⚠'} Teslim — son inceleme
@@ -478,7 +478,7 @@ ${(review.issues || []).map((i) => `- Açık: ${i}`).join('\n')}
     else this.log('system', 'warn', `Teslime hazır değil — ${review.issues.length} açık sorun var (raporda). "Düzeltmeye devam et" ile ek düzeltme turları başlatabilirsiniz.`);
   }
 
-  // Gemini'ye ulaşılamadığında: eldeki kanıtlardan kısa ve dürüst bir teslim raporu.
+  // Yöneticiye ulaşılamadığında: eldeki kanıtlardan kısa ve dürüst bir teslim raporu.
   fallbackReport(review, checks, smoke) {
     const job = this.job;
     const tasks = job.tasks.filter((t) => t.status !== 'skipped');
@@ -514,7 +514,7 @@ ${(review.issues || []).map((i) => `- Açık: ${i}`).join('\n')}
       ...(job.findings || []).filter((f) => f.status === 'open').map((f) => `- AÇIK ${f.id} [${f.severity}] ${f.title}${f.file ? ` (${f.file})` : ''}`),
       ...(job.findings || []).filter((f) => f.status === 'uncertain').slice(0, 15).map((f) => `- Elle kontrol: ${f.id} [${f.severity}] ${f.title}${f.file ? ` (${f.file})` : ''}`),
       '',
-      '_Bu rapor, Gemini\'ye ulaşılamadığı için Sonda tarafından eldeki sonuçlardan oluşturuldu._',
+      '_Bu rapor, yöneticiye ulaşılamadığı için Sonda tarafından eldeki sonuçlardan oluşturuldu._',
     ];
     return lines.join('\n');
   }

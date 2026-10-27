@@ -19,9 +19,10 @@ class Task {
     this.log('system', 'step', `Görev ${n}/${job.tasks.length}: ${task.title}`);
     const carried = await this.beginTask(task);
     const tree = project.fileTree(job.projectDir, { maxEntries: 300, maxDepth: 5 });
-    // Kesilip sürdürülen görevde brif önceki çalışmadan durur: yeniden yazdırılmaz (brif en pahalı salt okunur
-    // oturumdur). Yeniden planlanan görevin brifi yoktur ve yazılır.
-    if (s.taskBriefing && task.brief && carried.length) {
+    // Durdurulup sürdürülen ya da yeniden denenen görevde brif önceki çalışmadan durur: yeniden yazdırılmaz (brif en
+    // pahalı salt okunur oturumdur; görev ve kod tabanı aynıdır). Yeniden planlanan görevin brifi yoktur ve yazılır;
+    // kısa / bozuk kalmış bir brif de (kabul eşiğinin altı) yeniden yazılır.
+    if (s.taskBriefing && String(task.brief || '').trim().length >= 400) {
       this.log('review', 'info', `Teknik brif önceki çalışmadan korunuyor (${task.briefBy || 'brif'}, ${Math.round(task.brief.length / 1000)}K karakter); yeniden yazdırılmadı.`);
     } else if (s.taskBriefing) {
       task.brief = (await this.writeBrief(task, tree, s)) || task.brief;
@@ -58,37 +59,39 @@ class Task {
 
   /**
    * Görev öncesi teknik brif. Varsayılan: Claude Fable 5.1 kodu gezerek yazar (salt okunur oturum). Claude kurulu
-   * değilse ya da Ayarlar'da Gemini seçildiyse Gemini yazar (dosya ağacı + anahtar dosyalar üzerinden).
+   * değilse yönetici yazar (dosya ağacı + anahtar dosyalar üzerinden).
    * Dönen: brif metni ya da yazılamadıysa null (görev planıyla devam edilir).
    */
   async writeBrief(task, tree, s) {
     const job = this.job;
     const dir = job.projectDir;
-    const model = briefModelOf(s);
-    if (model && agents.resolveBin('claude', s)) {
-      const label = claudeModelLabel(model);
-      this.log('review', 'step', `Teknik brif: Claude ${label} kodu inceleyip bu görevin brifini yazıyor…`);
+    // Brifi salt okunur ajan oturumu yazar: Claude (Fable 5.1 / seçilen brif modeli) ya da Claude'suz çalışmada kodlayan ajan.
+    const rid = this.reviewerId();
+    const model = rid === 'claude' ? briefModelOf(s) : null;
+    if (rid && agents.resolveBin(rid, s)) {
+      const label = rid === 'claude' ? `Claude ${claudeModelLabel(model)}` : `${agents.ADAPTERS[rid].label}${this.agentModelFor(s, rid, 'brief') ? ` (${this.agentModelFor(s, rid, 'brief')})` : ''}`;
+      this.log('review', 'step', `Teknik brif: ${label} kodu inceleyip bu görevin brifini yazıyor…`);
       try {
-        const res = await this.runAgent(P.briefAgentPrompt({ job, task }), { mode: 'review', agentId: 'claude', model, label: `teknik brif · ${label}`, src: 'review', timeoutMin: 15, quiet: true });
+        const res = await this.runAgent(P.briefAgentPrompt({ job, task }), { mode: 'review', agentId: rid, model: model || undefined, role: 'brief', label: `teknik brif · ${rid === 'claude' ? claudeModelLabel(model) : agents.ADAPTERS[rid].label}`, src: 'review', timeoutMin: 15, quiet: true });
         const brief = String(res.text || '').trim();
         if (res.ok && brief.length >= 400) {
-          this.log('review', 'ok', `Teknik brif hazır (Claude ${label}, ${Math.round(brief.length / 1000)}K karakter).`);
-          task.briefBy = `Claude ${label}`;
+          this.log('review', 'ok', `Teknik brif hazır (${label}, ${Math.round(brief.length / 1000)}K karakter).`);
+          task.briefBy = label;
           return brief;
         }
-        this.log('review', 'warn', `Claude ${label} kullanılabilir bir brif vermedi${res.error ? ` (${String(res.error).split('\n')[0].slice(0, 160)})` : ''}.`);
+        this.log('review', 'warn', `${label} kullanılabilir bir brif vermedi${res.error ? ` (${String(res.error).split('\n')[0].slice(0, 160)})` : ''}.`);
       } catch (e) {
         this.checkAbort();
         if (agents.AUTH_ERROR.test(e.message)) throw e;
         this.log('review', 'warn', `Brif oturumu başarısız: ${e.message}`);
       }
-      if (!settings.managerReady(settings.get())) {
+      if (!settings.managerReady(this.cfg())) {
         this.log('system', 'warn', 'Brif hazırlanamadı; görev planıyla devam ediliyor.');
         return null;
       }
-      this.log('gemini', 'info', 'Brifi Gemini yazıyor (yedek)…');
+      this.log('manager', 'info', 'Brifi yönetici yazıyor (yedek)…');
     } else {
-      this.log('gemini', 'info', 'Gemini mevcut kodu okuyup bu görev için teknik brif hazırlıyor…');
+      this.log('manager', 'info', 'Yönetici mevcut kodu okuyup bu görev için teknik brif hazırlıyor…');
     }
     try {
       const brief = String(await this.gem({
@@ -98,12 +101,12 @@ class Task {
         maxOutputTokens: 32768,
         progressLabel: 'Brif yazılıyor',
       })).trim();
-      this.log('gemini', 'ok', `Teknik brif hazır (${Math.round(brief.length / 1000)}K karakter).`);
-      task.briefBy = 'Gemini';
+      this.log('manager', 'ok', `Teknik brif hazır (${Math.round(brief.length / 1000)}K karakter).`);
+      task.briefBy = 'Yönetici';
       return brief;
     } catch (e) {
       this.checkAbort();
-      this.log('gemini', 'warn', `Brif hazırlanamadı, görev planıyla devam ediliyor: ${e.message}`);
+      this.log('manager', 'warn', `Brif hazırlanamadı, görev planıyla devam ediliyor: ${e.message}`);
       return null;
     }
   }
@@ -154,29 +157,29 @@ class Task {
   }
 
   /**
-   * TDD testlerinin kod yazılmadan önceki incelemesi. Gemini "yönetici" rolündeyken bağımsız bir ajan oturumu yapar
-   * (test dosyalarını ve dayandıkları kurulumu kendisi okur); sonuç vermezse ve anahtar varsa Gemini'ye düşülür.
+   * TDD testlerinin kod yazılmadan önceki incelemesi. yönetici rolü "manager" iken bağımsız bir ajan oturumu yapar
+   * (test dosyalarını ve dayandıkları kurulumu kendisi okur); sonuç vermezse ve yönetici hazırsa ona düşülür.
    * Dönen: { tr: { verdict: 'ok' | 'fix', problems } | null, src (günlük kaynağı) }
    */
   async reviewTddTests(task, written, s) {
     const job = this.job;
     const files = project.fileContents(job.projectDir, written, 150000);
-    const viaGemini = () => this.gem({ system: P.TEST_REVIEW_SYSTEM, parts: [{ text: P.testReviewUserText({ job, task, files }) }], schema: P.TEST_REVIEW_SCHEMA, temperature: 0.1 });
+    const viaManager = () => this.gem({ system: P.TEST_REVIEW_SYSTEM, parts: [{ text: P.testReviewUserText({ job, task, files }) }], schema: P.TEST_REVIEW_SCHEMA, temperature: 0.1 });
     const rid = this.agentsLead(s) ? this.reviewerId() : null;
     if (!rid) {
-      this.log('gemini', 'info', 'Gemini TDD testlerini şartname ve kabul kriterleriyle karşılaştırıyor (kod yazılmadan önce)…');
-      return { tr: await viaGemini(), src: 'gemini' };
+      this.log('manager', 'info', 'Yönetici TDD testlerini şartname ve kabul kriterleriyle karşılaştırıyor (kod yazılmadan önce)…');
+      return { tr: await viaManager(), src: 'manager' };
     }
     this.log('review', 'info', `${agents.ADAPTERS[rid].label} TDD testlerini şartname ve kabul kriterleriyle karşılaştırıyor (kod yazılmadan önce)…`);
     const res = await this.runAgent(P.testReviewAgentPrompt({ job, task, files }), { mode: 'review', schema: P.TEST_REVIEW_JSON_SCHEMA, agentId: rid, label: 'TDD test incelemesi', src: 'review', timeoutMin: 10, effort: s.reviewEffort || undefined, quiet: true });
     const out = res.structured || agents.jsonFromText(res.transcript || res.text);
     if (['ok', 'fix'].includes(out?.verdict)) return { tr: out, src: 'review' };
-    if (!settings.managerReady(settings.get())) {
+    if (!settings.managerReady(this.cfg())) {
       this.log('review', 'warn', 'TDD test incelemesi sonuç vermedi; testler incelenmeden devam ediliyor.');
       return { tr: null, src: 'review' };
     }
-    this.log('gemini', 'info', 'TDD testlerini Gemini inceliyor (yedek)…');
-    return { tr: await viaGemini(), src: 'gemini' };
+    this.log('manager', 'info', 'TDD testlerini yönetici inceliyor (yedek)…');
+    return { tr: await viaManager(), src: 'manager' };
   }
 
   // Kodlayan ajan görevi uygular; süre hedefini aşarsa sonraki göreve hatırlatma düşülür.
@@ -249,7 +252,7 @@ class Task {
   }
 
   /**
-   * Bir turun incelemesi: ilk inceleme (ajan ya da Gemini), uzman paneli, bulguların doğrulanması, deftere kayıt ve
+   * Bir turun incelemesi: ilk inceleme (ajan ya da yönetici), uzman paneli, bulguların doğrulanması, deftere kayıt ve
    * — düzeltme turundan sonra — açık bulguların yeniden doğrulanması.
    * Dönen: { review, coreOk (bulgular dışında engel yok mu), src (günlük kaynağı) }
    */
@@ -261,7 +264,7 @@ class Task {
     const rid = s.reviewLevel !== 'standard' && this.useGit ? this.reviewerId() : null;
     const where = `görev "${task.title}"`;
     const byAgent = this.agentsLead(s);
-    if (!byAgent) this.log('gemini', 'info', 'Gemini değişikliği kırmayı deneyerek inceliyor (görevin tüm farkı, değişen dosyalar ve içe aktardıkları, kabul kriterleri, testler)…');
+    if (!byAgent) this.log('manager', 'info', 'Yönetici değişikliği kırmayı deneyerek inceliyor (görevin tüm farkı, değişen dosyalar ve içe aktardıkları, kabul kriterleri, testler)…');
     const diff = this.useGit ? await project.diffSince(dir, base, 80000) : null;
     const changed = this.useGit ? await project.changedFiles(dir, base) : [];
     let tddNote = null;
@@ -272,9 +275,9 @@ class Task {
         : `The QA engineer wrote these tests first: ${task.tddFiles.join(', ')}. The implementer did not modify them.`;
     }
     const installed = project.installedVersions(dir);
-    // İlk inceleme. Gemini "yönetici" rolündeyken bağımsız bir ajan oturumu yapar (kodu gezer, testleri çalıştırır);
-    // "her adımda" rolündeyken Gemini yapar (fark, değişen dosyalar ve içe aktardıkları üzerinden).
-    const geminiReview = () => this.gem({
+    // İlk inceleme. Yönetici rolü "manager" iken bağımsız bir ajan oturumu yapar (kodu gezer, testleri çalıştırır);
+    // "her adımda" rolündeyken yönetici yapar (fark, değişen dosyalar ve içe aktardıkları üzerinden).
+    const managerReview = () => this.gem({
       system: P.reviewSystem(lang),
       parts: [{ text: P.reviewUserText({ job, task, agentSummary: task.agentSummary, checks, diff, files: this.useGit ? project.fileContents(dir, changed, 200000) : null, related: this.useGit ? project.relatedFiles(dir, changed, 100000).text : '', tddNote, installed }) }],
       schema: P.REVIEW_SCHEMA,
@@ -287,16 +290,16 @@ class Task {
     // (Sırayla çalıştırmak her görevde dakikalarca bekletiyordu.)
     const specialistsOn = !round.panelRan && checksOk && !!rid && s.reviewPanel !== false && changed.length > 0;
     const [first, deep, recheck, outs] = await this.together([
-      byAgent ? this.agentReview(task, { checks, changed, diff, tddNote, installed }) : geminiReview(),
-      // Maksimum inceleme gücünde (ilk incelemeyi Gemini yapıyorsa) Claude da bağımsız derin inceleme yapar.
+      byAgent ? this.agentReview(task, { checks, changed, diff, tddNote, installed }) : managerReview(),
+      // Maksimum inceleme gücünde (ilk incelemeyi yönetici yapıyorsa) Claude da bağımsız derin inceleme yapar.
       !byAgent && s.reviewLevel === 'max' ? this.deepReview({ scope: `task "${task.title}"`, tasks: [task], reqIds: task.covers, checks, smoke: null }) : Promise.resolve(null),
       // Düzeltme turundan sonra: bu görevin açık bulguları güncel kodda yeniden doğrulanır (varsayım yok).
       mine.length && rid ? this.recheckFindings(mine, where) : Promise.resolve(null),
       specialistsOn ? this.taskSpecialists(task, changed, rid) : Promise.resolve(null),
     ]);
-    // Ajan incelemesi sonuç vermediyse (oturum hatası, biçimsiz yanıt) Gemini'ye düşülür.
-    const raw = first || (byAgent ? await this.reviewFallback(geminiReview, checks) : first);
-    const src = byAgent && first ? 'review' : 'gemini';
+    // Ajan incelemesi sonuç vermediyse (oturum hatası, biçimsiz yanıt) yöneticiye düşülür.
+    const raw = first || (byAgent ? await this.reviewFallback(managerReview, checks) : first);
+    const src = byAgent && first ? 'review' : 'manager';
     let review = this.normalizeReview(raw, checks, res.ok ? {} : { forceIssue: `Ajan görevi tamamlayamadı: ${String(res.error).slice(0, 300)}` });
     // İlk incelemenin bulguları da aynı doğrulayıcıdan geçer; uzmanlar çalışmamış olsa bile yeni bulgular doğrulanır.
     const mf = this.managerFindings(review);

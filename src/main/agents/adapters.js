@@ -245,6 +245,64 @@ function codexParser() {
   };
 }
 
+// ---------- OpenCode ----------
+// `opencode run --format json`: her satır bir olay ({ type, sessionID, part }). text → metin, tool → araç çağrısı,
+// step_finish → adım bitti (token / maliyet), error → hata. İstem stdin'den okunur.
+function opencodeParser() {
+  const state = { sessionId: null, text: '', texts: [], structured: null, isError: false, costUsd: 0, gotResult: false, errorText: '', tokens: 0 };
+  return {
+    state,
+    onLine(line) {
+      let ev;
+      try {
+        ev = JSON.parse(line);
+      } catch {
+        return line.trim() ? [{ lvl: 'dim', text: line }] : [];
+      }
+      if (ev.sessionID) state.sessionId = ev.sessionID;
+      const p = ev.part || {};
+      const out = [];
+      switch (ev.type) {
+        case 'step_start':
+          if (!state.gotResult && !state.texts.length) out.push({ lvl: 'info', text: 'OpenCode oturumu başladı' });
+          break;
+        case 'text':
+          if (p.text?.trim()) {
+            state.text = p.text;
+            state.texts.push(p.text);
+            out.push({ lvl: 'text', text: p.text.trim() });
+          }
+          break;
+        case 'tool_use':
+        case 'tool': {
+          const name = p.tool || p.name || 'araç';
+          const st = p.state || {};
+          out.push({ lvl: 'tool', text: `${name} · ${summarizeToolInput(name, st.input || p.input || {})}` });
+          if (st.status === 'error') out.push({ lvl: 'warn', text: clip(String(st.error || st.output || 'araç hatası').trim(), 600) });
+          else if (typeof st.output === 'string' && st.output.trim()) out.push({ lvl: 'dim', text: clip(st.output.trim(), 280) });
+          break;
+        }
+        case 'step_finish':
+          state.gotResult = true;
+          state.tokens += p.tokens?.total || 0;
+          state.costUsd += p.cost || 0;
+          if (p.reason === 'stop' || p.reason === 'length' || p.reason === 'error') {
+            out.push({ lvl: p.reason === 'stop' ? 'ok' : 'warn', text: `${p.reason === 'stop' ? 'Ajan bitirdi' : `Ajan durdu (${p.reason})`}${state.tokens ? ` · ${state.tokens.toLocaleString('tr-TR')} token` : ''}${state.costUsd ? ` · $${state.costUsd.toFixed(2)}` : ''}` });
+          }
+          break;
+        case 'error':
+          state.isError = true;
+          state.errorText = ev.error?.data?.message || ev.error?.message || ev.error?.name || 'OpenCode hatası';
+          out.push({ lvl: 'error', text: state.errorText });
+          break;
+        default:
+          break;
+      }
+      return out;
+    },
+  };
+}
+
 // Kodlayan ajanın araçları: yalnızca kodlama araçları. Alt ajan başlatma, kendine uyandırma kurma,
 // yayın yapma (Artifact), telefona bildirim, başka oturumlara mesaj gibi araçlar otonom hat içinde kapalı:
 // hem zaman kaybettirir (ör. alt ajan incelemesini 20 dk beklemek) hem de dışarıya etki eder.
@@ -263,6 +321,10 @@ const ADAPTERS = {
       const a = ['-p', '--output-format', 'stream-json', '--verbose'];
       // Model seçilmediyse Opus 5.5 (planlama, kodlama ve incelemelerin hepsi için).
       a.push('--model', claudeModelOf(settings));
+      // Verimlilik ve yalıtım: kullanıcının kişisel Claude Code ayarları (~/.claude CLAUDE.md, hafıza, eklentiler,
+      // hook'lar) ajan oturumlarına yüklenmez; yalnızca projenin kendi ayar ve CLAUDE.md'si girer. Kişisel
+      // talimatlar her oturuma binlerce token ekliyor ve otonom işe karışabiliyordu. Ayarlar'dan açılabilir.
+      if (!settings.claudeUserSettings) a.push('--setting-sources', 'project');
       if (settings.claudeEffort) a.push('--effort', settings.claudeEffort);
       // Bilgisayardaki kişisel MCP bağlantıları (deploy, tasarım araçları…) otonom ajanlara açılmaz. Salt okunur
       // oturumlar (brif, inceleme, uzman, doğrulama, hafıza) bu araçları hiç kullanamaz; ayar açık olsa bile yüklenmez:
@@ -294,7 +356,16 @@ const ADAPTERS = {
     supportsResume: false,
     buildArgs({ settings, lastMessageFile, mode = 'code' }) {
       const a = ['exec', '--json', '--skip-git-repo-check'];
-      if (settings.codexModel) a.push('--model', settings.codexModel);
+      // Sağlayıcı: yerel model (codex --oss: Ollama / LM Studio, OpenAI hesabı gerekmez) ya da NVIDIA NIM (OpenAI uyumlu
+      // sohbet API'si; sağlayıcı -c ile tanımlanır, anahtar NVIDIA_API_KEY olarak yalnızca bu oturumun ortamına girer).
+      // Model adı codexModel'den gelir (yerelde ör. "qwen3-coder:30b", NIM'de yönetici için seçilen model yedektir).
+      const provider = settings.codexProvider || 'openai';
+      if (provider === 'local') a.push('--oss', '--local-provider', settings.codexLocalProvider === 'lmstudio' ? 'lmstudio' : 'ollama');
+      else if (provider === 'nim') {
+        a.push('-c', 'model_provider=nim', '-c', 'model_providers.nim.name="NVIDIA NIM"', '-c', `model_providers.nim.base_url="${String(settings.nimBaseUrl || 'https://integrate.api.nvidia.com/v1').replace(/"/g, '')}"`, '-c', 'model_providers.nim.env_key="NVIDIA_API_KEY"', '-c', 'model_providers.nim.wire_api="chat"');
+      }
+      const model = settings.codexModel || (provider === 'nim' ? settings.nimModel : '');
+      if (model) a.push('--model', model);
       if (mode === 'review') a.push('--sandbox', 'read-only');
       else if (settings.codexPermission === 'safe') a.push('--full-auto', '-c', 'sandbox_workspace_write.network_access=true');
       else a.push('--dangerously-bypass-approvals-and-sandbox');
@@ -303,6 +374,31 @@ const ADAPTERS = {
       return a;
     },
     createParser: codexParser,
+  },
+  opencode: {
+    id: 'opencode',
+    label: 'OpenCode',
+    bin: 'opencode',
+    // Masaüstü uygulamasının paketlediği CLI de tanınır (PATH'te opencode-cli ya da Windows'ta bilinen yolu, bkz. install.js);
+    // sürümü yeni olan seçilir.
+    altBins: ['opencode-cli'],
+    install: 'npm install -g opencode-ai',
+    login: 'Terminalde `opencode auth login` ile bir sağlayıcı (NVIDIA, OpenAI, Anthropic, OpenRouter…) anahtarı girin.',
+    supportsResume: true,
+    buildArgs({ settings, resumeId, mode = 'code' }) {
+      const a = ['run', '--format', 'json'];
+      // Model "sağlayıcı/model" biçimindedir (ör. nvidia/deepseek-ai/deepseek-v4-pro, opencode/big-pickle). Salt okunur
+      // oturumlar ayrı bir model kullanabilir; boşsa OpenCode'un kendi varsayılanı.
+      const model = mode === 'review' ? settings.opencodeReviewModel || settings.opencodeModel : settings.opencodeModel;
+      if (model) a.push('-m', model);
+      if (resumeId) a.push('-s', resumeId);
+      // plan: OpenCode'un yerleşik salt okunur ajanı (dosya yazma ve düzenleme reddedilir). Yazma oturumunda izinler
+      // sorulmadan onaylanır (--auto); aksi halde etkileşimsiz çalışma takılırdı.
+      if (mode === 'review') a.push('--agent', 'plan');
+      else a.push('--auto');
+      return a;
+    },
+    createParser: opencodeParser,
   },
 };
 

@@ -2,8 +2,10 @@
 const dns = require('dns');
 const net = require('net');
 
-// Ajan oturumlarının ve Gemini'nin konuştuğu sunucular.
-const HOSTS = { claude: 'api.anthropic.com', codex: 'api.openai.com', gemini: 'generativelanguage.googleapis.com' };
+// Ajan oturumlarının ve yöneticinin konuştuğu sunucular.
+// OpenCode'un sağlayıcısı bilinmez (NVIDIA, OpenAI, OpenRouter…); bağlantı yoklaması için OpenCode'un açılışta
+// model kataloğunu çektiği sunucu kullanılır.
+const HOSTS = { claude: 'api.anthropic.com', codex: 'api.openai.com', opencode: 'models.dev' };
 
 // Vekil sunucu arkasında doğrudan bağlantı denemesi yanıltır (API vekilden erişilebilir olabilir): yoklama atlanır.
 const proxied = () => ['HTTPS_PROXY', 'https_proxy', 'ALL_PROXY', 'all_proxy'].some((k) => process.env[k]);
@@ -60,4 +62,13 @@ async function waitOnline(host, { signal, maxMs = 6 * 3600 * 1000, everyMs = 150
   }
 }
 
-module.exports = { HOSTS, reachable, waitOnline };
+// Bir API adresinin sunucu adı (bağlantı yoklaması için); çözülemezse Claude'un sunucusu.
+const hostOf = (url) => {
+  try {
+    return new URL(String(url || '')).hostname || HOSTS.claude;
+  } catch {
+    return HOSTS.claude;
+  }
+};
+
+module.exports = { HOSTS, hostOf, reachable, waitOnline };

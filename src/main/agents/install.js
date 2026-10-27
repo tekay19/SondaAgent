@@ -6,12 +6,42 @@ const runner = require('../runner');
 const { IS_WIN, findExecutable, findAllExecutables, agentEnv } = require('../env');
 const { ADAPTERS } = require('./adapters');
 
+// PATH'te olmayan bilinen kurulum yerleri. OpenCode masaüstü uygulaması CLI'yi %LOCALAPPDATA%\opencode\opencode-cli.exe
+// olarak paketler; aynı klasördeki OpenCode.exe ise GUI'dir. Klasör PATH'e eklenmez: "opencode" araması GUI'yi bulur ve
+// sürüm sorgusu pencereyi açıp ana süreci dakikalarca kilitlerdi. Yalnızca CLI dosyası adıyla aranır.
+const KNOWN_PATHS = {
+  opencode: () => (IS_WIN && process.env.LOCALAPPDATA ? [path.join(process.env.LOCALAPPDATA, 'opencode', 'opencode-cli.exe')] : []),
+};
+
+// PATH taraması kısa süre önbellekte tutulur: resolveBin bir iş boyunca onlarca kez çağrılır (inceleyici seçimi, günlük
+// notları) ve her çağrı PATH'teki bütün klasörleri dolaşıyordu. Kurulum / güncelleme önbelleği boşaltır; dışarıdan
+// yapılan bir kurulum en geç BIN_TTL_MS sonra görünür.
+const BIN_TTL_MS = 10000;
+const binCache = new Map(); // agentId → { at, bin }
+const forgetBins = () => binCache.clear();
+
 // Bilgisayarda birden fazla kurulum olabilir (Homebrew, resmi yükleyici, npm). Kullanıcı yol
 // vermediyse en yeni sürüm kullanılır: Homebrew çoğu zaman birkaç sürüm geriden gelir.
 function resolveBin(agentId, settings) {
-  const custom = agentId === 'claude' ? settings.claudePath : settings.codexPath;
+  const custom = settings[`${agentId}Path`];
   if (custom?.trim()) return findExecutable(custom.trim());
-  const all = findAllExecutables(ADAPTERS[agentId].bin);
+  const hit = binCache.get(agentId);
+  if (hit && Date.now() - hit.at < BIN_TTL_MS) return hit.bin;
+  const bin = scanBin(agentId);
+  binCache.set(agentId, { at: Date.now(), bin });
+  return bin;
+}
+
+function scanBin(agentId) {
+  const a = ADAPTERS[agentId];
+  const known = (KNOWN_PATHS[agentId]?.() || []).filter((p) => {
+    try {
+      return fs.statSync(p).isFile();
+    } catch {
+      return false;
+    }
+  });
+  const all = [...[a.bin, ...(a.altBins || [])].flatMap((name) => findAllExecutables(name)), ...known];
   if (all.length <= 1) return all[0] || null;
   let best = all[0];
   let bestV = semver(versionOf(best));
@@ -60,9 +90,9 @@ function cmpVersion(a, b) {
 }
 
 // ---------- güncelleme ----------
-const NPM_PACKAGE = { claude: '@anthropic-ai/claude-code', codex: '@openai/codex' };
+const NPM_PACKAGE = { claude: '@anthropic-ai/claude-code', codex: '@openai/codex', opencode: 'opencode-ai' };
 
-const BREW_NAME = { claude: 'claude-code', codex: 'codex' };
+const BREW_NAME = { claude: 'claude-code', codex: 'codex', opencode: 'opencode' };
 
 // Kurulumun nasıl yapıldığı gerçek dosya yolundan anlaşılır; güncelleme komutu buna göre seçilir.
 function installKind(bin) {
@@ -75,7 +105,8 @@ function installKind(bin) {
   const p = real.replace(/\\/g, '/');
   if (/\/(Caskroom|Cellar)\//.test(p)) return { kind: 'brew', label: 'Homebrew', cask: p.includes('/Caskroom/') };
   if (/\/\.local\/share\/claude\/versions\/|\/\.claude\/local\//.test(p)) return { kind: 'native', label: 'resmi yükleyici' };
-  if (/node_modules\//.test(p)) return { kind: 'npm', label: 'npm' };
+  // npm global kurulum: node_modules altındaki gerçek dosya ya da Windows'taki sarmalayıcı (%APPDATA%\npm\x.cmd).
+  if (/node_modules\//.test(p) || /\/npm\/[^/]+(\.cmd|\.ps1)?$/i.test(p)) return { kind: 'npm', label: 'npm' };
   return { kind: 'other', label: '' };
 }
 
@@ -131,6 +162,7 @@ async function install(agentId, settings, { onLine, signal } = {}) {
     ? await runner.run({ command: 'powershell.exe', args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', 'irm https://claude.ai/install.ps1 | iex'], ...opts })
     : await runner.run({ command: '/bin/bash', args: ['-c', 'set -o pipefail; curl -fsSL https://claude.ai/install.sh | bash'], ...opts });
   versionCache.clear();
+  forgetBins();
   const bin = resolveBin('claude', settings);
   if (!bin) {
     const tail = lines.slice(-6).join('\n') || r.error || `çıkış kodu ${r.code}`;
@@ -148,6 +180,7 @@ async function update(agentId, settings) {
   const r = await runner.run({ ...cmd, env: { ...agentEnv(), HOMEBREW_NO_INSTALL_CLEANUP: '1', CI: '1' }, timeoutMs: 5 * 60000, tailSize: 20000 });
   versionCache.clear();
   latestCache.clear();
+  forgetBins();
   const nowBin = resolveBin(agentId, settings);
   const after = semver(versionOf(nowBin));
   if (r.code !== 0) {
@@ -157,4 +190,4 @@ async function update(agentId, settings) {
   return { before, after, command: [path.basename(cmd.command), ...cmd.args].join(' ') };
 }
 
-module.exports = { resolveBin, versionOf, semver, cmpVersion, installKind, updateCommand, latestVersion, install, update };
+module.exports = { resolveBin, forgetBins, versionOf, semver, cmpVersion, installKind, updateCommand, latestVersion, install, update };

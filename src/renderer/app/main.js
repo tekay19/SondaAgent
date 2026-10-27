@@ -6,7 +6,7 @@ import { api, $, IS_MAC, managerOf, state, attempt } from './core.js';
 import { show, refreshHistory, refreshHistorySoon, renderHistory, openJob } from './history.js';
 import { refreshAgents, renderAgentStatus, renderConnSoon } from './agents.js';
 import { renderThemeBtn } from './theme.js';
-import { setAgent, renderFolder, renderAttachments, renderReadiness } from './compose.js';
+import { loadStackFor, renderFolder, renderAttachments, renderReadiness } from './compose.js';
 import { renderJob } from './job.js';
 import { appendLog, renderShots } from './logs.js';
 import { selectTab } from './header.js';
@@ -73,10 +73,9 @@ async function init() {
   $('#planBtn .kbd').textContent = IS_MAC ? '⌘↵' : 'Ctrl+↵';
   state.settings = await attempt(() => api.getSettings());
   renderThemeBtn();
-  if (state.settings) {
-    state.compose.projectDir = state.settings.lastProjectDir || '';
-    setAgent(state.settings.defaultAgent || 'claude');
-  }
+  if (state.settings) state.compose.projectDir = state.settings.lastProjectDir || '';
+  // Kadro: son klasörün hatırlanan kadrosu, yoksa Ayarlar'daki varsayılanlar.
+  await loadStackFor(state.compose.projectDir);
   renderFolder();
   renderAttachments();
   renderAgentStatus();

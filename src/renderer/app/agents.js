@@ -16,8 +16,8 @@ async function refreshAgents(force = false) {
 function renderAgentStatus() {
   const s = state.settings;
   const mgr = managerOf(s);
-  const items = [`<span class="as" title="${esc(mgr.name)} ${esc(mgr.model || '')}${mgr.has ? '' : ' — API anahtarı yok'}"><span class="dot ${mgr.has ? 'done' : 'failed'}"></span>${esc(mgr.name)}</span>`];
-  const tab = document.querySelector('[data-f="gemini"]');
+  const items = [`<span class="as" title="${esc(mgr.name)} ${esc(mgr.model || '')}${mgr.has ? '' : mgr.cli ? ' — Claude Code kurulu değil' : mgr.local || mgr.nim ? ' — model ya da anahtar eksik' : ' — API anahtarı yok'}"><span class="dot ${mgr.has ? 'done' : 'failed'}"></span>${esc(mgr.name)}</span>`];
+  const tab = document.querySelector('[data-f="manager"]');
   if (tab) tab.textContent = mgr.name;
   for (const a of Object.values(state.agents || {})) {
     // Codex isteğe bağlıdır: kurulu değilse ve seçili ajan da değilse durum satırını kalabalıklaştırmaz.
@@ -77,7 +77,7 @@ function connectionHtml(a, { compact = false } = {}) {
     : test?.ok
       ? ['done', `${esc(test.model || model)} yanıt verdi.`]
       : test && !test.ok
-        ? ['error', `${esc(test.error || 'Deneme isteği başarısız.')}${/model/i.test(test.error || '') ? ' Ayarlar → Ajanlar → Model\'den başka bir model seçip yeniden deneyebilirsin.' : ''}`]
+        ? ['error', `${esc(test.error || 'Deneme isteği başarısız.')}${/model/i.test(test.error || '') ? ' Ayarlar → Modeller → Kodlayıcı\'dan başka bir model seçip yeniden deneyebilirsin.' : ''}`]
         : ['todo', a.found && a.loggedIn === true ? `Henüz denenmedi. ${esc(model)} ile küçük bir istek gönderilir.` : `Giriş sonrası ${esc(model)} ile küçük bir istek gönderilir.`];
   const ready = a.found && a.loggedIn === true;
   const label = !a.found ? `${ico('arrow-up')} Claude'u kur ve bağla` : a.loggedIn !== true ? `${ico('lock')} Giriş yap` : `${ico('refresh')} Bağlantıyı test et`;

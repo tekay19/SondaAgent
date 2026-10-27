@@ -45,20 +45,44 @@ function fixPath() {
 
 function findExecutable(name) {
   if (!name) return null;
-  if (path.isAbsolute(name)) return fs.existsSync(name) ? name : null;
+  if (path.isAbsolute(name)) return fs.existsSync(name) && !isGuiExecutable(name) ? name : null;
   const exts = IS_WIN ? (process.env.PATHEXT || '.EXE;.CMD;.BAT').split(';').concat(['']) : [''];
   for (const dir of (process.env.PATH || '').split(SEP)) {
     if (!dir) continue;
     for (const ext of exts) {
       const full = path.join(dir, name + ext.toLowerCase());
       try {
-        if (fs.statSync(full).isFile()) return full;
+        if (fs.statSync(full).isFile() && !isGuiExecutable(full)) return full;
       } catch {
         /* yok */
       }
     }
   }
   return null;
+}
+
+/**
+ * Windows'ta pencereli (GUI alt sistemli) bir .exe, CLI aramasında hiç çalıştırılmaz: OpenCode masaüstü uygulaması
+ * (OpenCode.exe) "opencode" adıyla PATH'e düşünce sürüm sorgusu uygulamayı açıyor ve ana süreci kilitliyordu. PE
+ * başlığındaki Subsystem alanı okunur (2 = Windows GUI, 3 = konsol); okunamayan dosya konsol sayılır.
+ */
+function isGuiExecutable(file) {
+  if (!IS_WIN || !/\.exe$/i.test(file)) return false;
+  let fd;
+  try {
+    fd = fs.openSync(file, 'r');
+    const head = Buffer.alloc(64);
+    if (fs.readSync(fd, head, 0, 64, 0) < 64 || head.toString('ascii', 0, 2) !== 'MZ') return false;
+    const peOffset = head.readUInt32LE(0x3c);
+    // PE imzası (4) + COFF başlığı (20) + isteğe bağlı başlıkta Subsystem (68; PE32 ve PE32+ aynı).
+    const pe = Buffer.alloc(4 + 20 + 70);
+    if (fs.readSync(fd, pe, 0, pe.length, peOffset) < pe.length || pe.toString('ascii', 0, 4) !== 'PE\0\0') return false;
+    return pe.readUInt16LE(4 + 20 + 68) === 2;
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
 }
 
 // PATH'teki tüm eşleşmeler (aynı dosyaya giden bağlantılar tekilleştirilir), PATH sırasıyla.
@@ -68,10 +92,14 @@ function findAllExecutables(name) {
   const seen = new Set();
   for (const dir of (process.env.PATH || '').split(SEP)) {
     if (!dir) continue;
+    let found = 0;
     for (const ext of exts) {
+      // Windows'ta uzantısız dosya çoğu zaman npm'in sh sarmalayıcısıdır (yanında .cmd vardır): çalıştırılamaz, atlanır.
+      if (IS_WIN && ext === '' && found) continue;
       const full = path.join(dir, name + ext.toLowerCase());
       try {
-        if (!fs.statSync(full).isFile()) continue;
+        if (!fs.statSync(full).isFile() || isGuiExecutable(full)) continue;
+        found++;
         const real = fs.realpathSync(full);
         if (seen.has(real)) continue;
         seen.add(real);
@@ -91,7 +119,7 @@ const KEEP_CLAUDE_VARS = /^CLAUDE_CODE_(USE_|SKIP_|GIT_BASH_PATH|MAX_OUTPUT_TOKE
 // varsa Claude Code aboneliği bırakıp API faturalı çalışmaya geçer; bu yüzden anahtar ajanlara aktarılmaz.
 const API_BILLING_VARS = new Set(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN']);
 
-// Bilgisayardaki gizli değişkenler (GEMINI_API_KEY, OPENAI_API_KEY, GITHUB_TOKEN, AWS_SECRET_ACCESS_KEY…) ajanlara ve
+// Bilgisayardaki gizli değişkenler (OPENAI_API_KEY, GITHUB_TOKEN, AWS_SECRET_ACCESS_KEY…) ajanlara ve
 // projenin komutlarına (ajanın yazdığı testler, kurulum betikleri) aktarılmaz: bir istem enjeksiyonu ya da özensiz bir
 // betik onları dışarı sızdırabilirdi. Ad parçalarına bakılır (bkz. envfile.secretName); jeton/sır sözcüğü adın ortasında
 // da olabilir (AWS_BEARER_TOKEN_BEDROCK).
@@ -132,4 +160,4 @@ function verifyEnv(extra = {}) {
   return { ...env, CI: 'true', NEXT_TELEMETRY_DISABLED: '1', BROWSER: 'none', ...extra };
 }
 
-module.exports = { IS_WIN, fixPath, findExecutable, findAllExecutables, agentEnv, verifyEnv };
+module.exports = { IS_WIN, fixPath, findExecutable, findAllExecutables, isGuiExecutable, agentEnv, verifyEnv };
