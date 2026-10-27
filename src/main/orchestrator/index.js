@@ -319,17 +319,14 @@ class Orchestrator {
     let lastLog = 0;
     // Kullanıcının gizli değerleri (diff, dosya içeriği, test çıktısı içinde olsa bile) yöneticiye gitmez.
     const red = this.redactor();
-    // Yönetici: Claude CLI (varsayılan; abonelik), Claude API ya da yerel model (OpenAI uyumlu sunucu). Üçü aynı
-    // sözleşmeyi taşır; yalnızca kimlik (CLI oturumu / anahtar / adres) ve model değişir. Şemalar standart JSON Schema'dır.
-    const by = settings.managerBy(s);
-    // Yerel model ve NVIDIA NIM aynı (OpenAI uyumlu) istemciyi kullanır; yalnızca adres ve anahtar değişir. OpenCode kendi
-    // sağlayıcı anahtarlarıyla CLI üzerinden çalışır (anahtar ve adres Sonda'da yoktur).
-    const client = by === 'anthropic' ? anthropic : by === 'local' || by === 'nim' ? localllm : by === 'opencode' ? opencodecli : claudecli;
+    // Yönetici sağlayıcıları aynı sözleşmeyi taşır; yalnızca istemci, kimlik (CLI oturumu / anahtar / adres) ve model
+    // değişir (bkz. managerTarget). Şemalar standart JSON Schema'dır.
+    const { client, apiKey, baseUrl, model, host } = this.managerTarget(s);
     const who = settings.managerLabel(s);
     const args = {
-      apiKey: by === 'anthropic' ? s.anthropicKey : by === 'local' ? s.localApiKey : by === 'nim' ? s.nimApiKey : undefined,
-      baseUrl: by === 'local' ? s.localBaseUrl : by === 'nim' ? s.nimBaseUrl : undefined,
-      model: by === 'anthropic' ? s.anthropicModel : by === 'local' ? s.localModel : by === 'nim' ? s.nimModel : by === 'opencode' ? opencodecli.managerModelOf(s) : settings.managerClaudeModelOf(s),
+      apiKey,
+      baseUrl,
+      model,
       settings: s,
       system: system && red(system),
       parts: (parts || []).map((p) => (typeof p?.text === 'string' ? { ...p, text: red(p.text) } : p)),
@@ -364,11 +361,24 @@ class Orchestrator {
           continue;
         }
         if (offline > MAX_OFFLINE_RETRIES || !client.isNetworkError(e)) throw e;
-        if (by === 'local') throw e; // yerel sunucu: internet beklemek anlamsız, hata olduğu gibi bildirilir
-        await this.awaitNetwork(who, by === 'nim' ? net.hostOf(s.nimBaseUrl) : by === 'opencode' ? net.HOSTS.opencode : net.HOSTS.claude, e.message, offline);
+        if (!host) throw e; // yerel sunucu: internet beklemek anlamsız, hata olduğu gibi bildirilir
+        await this.awaitNetwork(who, host, e.message, offline);
         offline += 1;
       }
     }
+  }
+
+  // Yönetici hedefi: seçime göre istemci, kimlik, model ve bağlantı yoklaması için sunucu (yerel sunucuda yok). Yerel model
+  // ve NVIDIA NIM aynı (OpenAI uyumlu) istemciyi kullanır; OpenCode kendi sağlayıcı anahtarlarıyla CLI üzerinden çalışır.
+  managerTarget(s) {
+    const targets = {
+      claudecli: () => ({ client: claudecli, model: settings.managerClaudeModelOf(s), host: net.HOSTS.claude }),
+      anthropic: () => ({ client: anthropic, apiKey: s.anthropicKey, model: s.anthropicModel, host: net.HOSTS.claude }),
+      local: () => ({ client: localllm, apiKey: s.localApiKey, baseUrl: s.localBaseUrl, model: s.localModel, host: null }),
+      nim: () => ({ client: localllm, apiKey: s.nimApiKey, baseUrl: s.nimBaseUrl, model: s.nimModel, host: net.hostOf(s.nimBaseUrl) }),
+      opencode: () => ({ client: opencodecli, model: opencodecli.managerModelOf(s), host: net.HOSTS.opencode }),
+    };
+    return targets[settings.managerBy(s)]();
   }
 
   // Kodlayan ya da inceleyen ajanı çalıştırır. mode: 'code' (yazma yetkili) | 'review' (salt okunur).

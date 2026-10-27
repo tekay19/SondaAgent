@@ -14,8 +14,8 @@ const path = require('path');
 const core = require('./llmcore');
 const runner = require('./runner');
 const { resolveBin } = require('./agents/install');
-const { agentRunEnv, conforms, failureKind, jsonFromText } = require('./agents/run');
-const { clip, parseResetAt, ADAPTERS } = require('./agents/adapters');
+const { agentRunEnv, conforms, jsonFromText, cliRunError, cliFailure } = require('./agents/run');
+const { ADAPTERS } = require('./agents/adapters');
 const { materialize } = require('./claudecli');
 
 // Bir yönetici çağrısı için üst sınır: büyük bir şartname + plan 30 dakikayı aşmaz; aşarsa kopmuş bir oturumdur.
@@ -85,21 +85,13 @@ async function generate({ settings = {}, model, system, parts, schema, signal, o
           },
         });
         if (signal?.aborted) throw new Error('İptal edildi');
-        if (r.error) throw new OpenCodeCliError(`OpenCode başlatılamadı: ${r.error}`, 0);
-        if (r.noOutput) throw new OpenCodeCliError(`OpenCode ${Math.round(FIRST_OUTPUT_MS / 60000)} dakika boyunca hiç çıktı vermedi: seçili model ya da sağlayıcı yanıt vermiyor olabilir (Ayarlar → Modeller → Yönetici'den başka bir model seçin)`, 0, { timeout: true, network: true });
-        if (r.timedOut) throw new OpenCodeCliError(`OpenCode zaman aşımı (${Math.max(1, Math.round(timeoutMs / 60000))} dk)`, 0, { timeout: true, network: true });
+        const runErr = cliRunError(OpenCodeCliError, 'OpenCode', r, { firstOutputMs: FIRST_OUTPUT_MS, timeoutMs, noOutputHint: 'seçili model ya da sağlayıcı yanıt vermiyor olabilir (Ayarlar → Modeller → Yönetici\'den başka bir model seçin)' });
+        if (runErr) throw runErr;
         if (st.tokens || st.costUsd) onUsage?.({ totalTokenCount: st.tokens || 0, costUsd: st.costUsd || 0 });
         // Günlükteki asıl neden: `error="ProviderModelNotFoundError: Model not found: …"` biçimindeki son kayıt.
         const logCause = stderr.map((l) => l.match(/\berror="([^"]+)"/)?.[1]).filter(Boolean).pop() || '';
         const errText = [st.errorText || (r.code !== 0 ? stderr.slice(-15).join('\n') : ''), logCause].filter(Boolean).join(' — ');
-        if (st.isError || (r.code !== 0 && !st.gotResult)) {
-          const kind = failureKind(errText);
-          const msg = clip(errText || `çıkış kodu ${r.code}`, 600);
-          if (kind === 'limited') throw new OpenCodeCliError(`OpenCode sağlayıcı limiti: ${msg}`, 429, { limited: true, resetAt: parseResetAt(errText) });
-          if (kind === 'offline') throw new OpenCodeCliError(`OpenCode bağlantı hatası: ${msg}`, 0, { network: true });
-          if (kind === 'auth') throw new OpenCodeCliError(`OpenCode sağlayıcı anahtarı yok ya da geçersiz: ${msg}. Ayarlar → Bağlantılar → OpenCode → Giriş yap (opencode auth login).`, 401, { auth: true });
-          throw new OpenCodeCliError(`OpenCode hatası: ${msg}`, 0);
-        }
+        if (st.isError || (r.code !== 0 && !st.gotResult)) throw cliFailure(OpenCodeCliError, 'OpenCode', errText, r.code, { authWhat: 'sağlayıcı anahtarı yok ya da geçersiz', loginHint: 'Ayarlar → Bağlantılar → OpenCode → Giriş yap (opencode auth login).' });
         if (!st.gotResult) throw new OpenCodeCliError('OpenCode adım bitiş olayı göndermeden kapandı (yarım yanıt)', 0, { truncated: true });
         const textOut = st.texts.join('\n\n');
         if (!schema) {

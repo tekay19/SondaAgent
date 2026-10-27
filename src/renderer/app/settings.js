@@ -219,17 +219,19 @@ function renderWarnings() {
   if (by === 'local' && !$('#localModelSel').value) list.push('Yönetici yerel model ama model seçilmemiş: Bağlantılar → Yerel model sunucusu → "Modelleri getir", sonra yukarıdan seç.');
   if (by === 'nim' && !hasNimKey) list.push('Yönetici NVIDIA NIM ama API anahtarı yok: Bağlantılar → NVIDIA NIM.');
   if (by === 'nim' && hasNimKey && !$('#nimModelSel').value) list.push('NIM modeli seçilmemiş: Bağlantılar → NVIDIA NIM → "Modelleri getir", sonra yukarıdan seç.');
-  if (by === 'opencode' && ag.opencode && !ag.opencode.found) list.push('Yönetici OpenCode ama kurulu değil: npm install -g opencode-ai (Bağlantılar → OpenCode).');
+  // OpenCode: kurulu mu, model boş mu, modelin sağlayıcısı için anahtar var mı (ücretsiz opencode/* modeller anahtarsız çalışır).
+  const opencodeUsed = by === 'opencode' || coder === 'opencode';
+  if (opencodeUsed && ag.opencode && !ag.opencode.found) list.push('OpenCode kurulu değil: npm install -g opencode-ai (Bağlantılar → OpenCode).');
+  const providerKeyMissing = (m) => m && !/^opencode\//.test(m) && ag.opencode?.found && ag.opencode.loggedIn !== true;
   if (by === 'opencode' && ag.opencode?.found) {
     const m = form.elements.opencodeManagerModel.value.trim() || (coder === 'opencode' ? form.elements.opencodeModel.value.trim() : '');
-    if (!m) list.push('Yönetici OpenCode modeli boş: OpenCode kendi varsayılanını kullanır. Yönetici işleri uzun bağlam ve sağlam JSON ister; güçlü bir model seç (ör. nvidia/deepseek-ai/deepseek-v4-pro).');
-    else if (!/^opencode\//.test(m) && ag.opencode.loggedIn !== true) list.push(`"${m}" için sağlayıcı anahtarı yok: Bağlantılar → OpenCode → Giriş yap (opencode auth login).`);
+    if (!m) list.push('Yönetici OpenCode modeli boş: OpenCode kendi varsayılanını kullanır. Yönetici işleri uzun bağlam ve sağlam JSON ister; güçlü bir model seç (ör. nvidia/openai/gpt-oss-20b).');
+    else if (providerKeyMissing(m)) list.push(`"${m}" için sağlayıcı anahtarı yok: Bağlantılar → OpenCode → Giriş yap (opencode auth login).`);
   }
   if (coder === 'opencode') {
-    if (ag.opencode && !ag.opencode.found && by !== 'opencode') list.push('OpenCode kurulu değil: npm install -g opencode-ai (Bağlantılar → OpenCode).');
     const m = form.elements.opencodeModel.value.trim();
     if (!m) list.push('OpenCode modeli boş: OpenCode kendi varsayılan modelini kullanır. Takılır ya da hata verirse ücretsiz bir model seç (ör. opencode/big-pickle).');
-    else if (!/^opencode\//.test(m) && ag.opencode?.found && ag.opencode.loggedIn !== true) list.push(`"${m}" için sağlayıcı anahtarı yok: Bağlantılar → OpenCode → Giriş yap (opencode auth login).`);
+    else if (providerKeyMissing(m)) list.push(`"${m}" için sağlayıcı anahtarı yok: Bağlantılar → OpenCode → Giriş yap (opencode auth login).`);
   }
   if (coder.startsWith('codex') && ag.codex && !ag.codex.found) list.push('Codex kurulu değil: npm install -g @openai/codex (Bağlantılar → Codex).');
   if (coder === 'codex:openai' && ag.codex?.found && ag.codex.loggedIn === false) list.push('Codex için OpenAI girişi gerekli: Bağlantılar → Codex → Giriş yap.');

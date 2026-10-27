@@ -103,6 +103,29 @@ function failureKind(errText) {
   return 'error';
 }
 
+/**
+ * CLI tabanlı yönetici istemcileri (Claude CLI, OpenCode) için ortak hata üretimi. `Err` istemcinin hata sınıfı,
+ * `label` iletilerdeki ad. Süreç düzeyi: hiç başlamadı / ilk çıktı gelmedi / zaman aşımı → işaretli hata (zaman aşımları
+ * `timeout` + `network`: çekirdek bir kez yineler, orkestratör bağlantı bekler); sorun yoksa null.
+ */
+function cliRunError(Err, label, r, { firstOutputMs, timeoutMs, noOutputHint = '' }) {
+  if (r.error) return new Err(`${label} başlatılamadı: ${r.error}`, 0);
+  if (r.noOutput) return new Err(`${label} ${Math.max(1, Math.round(firstOutputMs / 60000))} dakika boyunca hiç çıktı vermedi${noOutputHint ? `: ${noOutputHint}` : ' (oturum takıldı)'}`, 0, { timeout: true, network: true });
+  if (r.timedOut) return new Err(`${label} zaman aşımı (${Math.max(1, Math.round(timeoutMs / 60000))} dk)`, 0, { timeout: true, network: true });
+  return null;
+}
+
+// Biten oturumun hata metnine göre işaretli hata: limit (`limited` + sıfırlanma saati), bağlantı (`network`), oturum ya da
+// anahtar (`auth` + giriş ipucu), diğer. `authWhat`: oturum sorununun adı (Claude: oturum, OpenCode: sağlayıcı anahtarı).
+function cliFailure(Err, label, errText, code, { authWhat = 'oturumu yok ya da süresi dolmuş', loginHint = '' } = {}) {
+  const kind = failureKind(errText);
+  const msg = clip(errText || `çıkış kodu ${code}`, 600);
+  if (kind === 'limited') return new Err(`${label} kullanım limiti: ${msg}`, 429, { limited: true, resetAt: parseResetAt(errText) });
+  if (kind === 'offline') return new Err(`${label} bağlantı hatası: ${msg}`, 0, { network: true });
+  if (kind === 'auth') return new Err(`${label} ${authWhat}: ${msg}.${loginHint ? ` ${loginHint}` : ''}`, 401, { auth: true });
+  return new Err(`${label} hatası: ${msg}`, 0);
+}
+
 async function runAgent({ agentId, settings, cwd, prompt, resumeId, onLog, signal, mode = 'code', schema, protectEnv = false, firstOutputMs = FIRST_OUTPUT_MS }) {
   const adapter = ADAPTERS[agentId];
   const bin = resolveBin(agentId, settings);
@@ -184,4 +207,4 @@ async function runAgent({ agentId, settings, cwd, prompt, resumeId, onLog, signa
   return { ok: true, text: st.text, structured, transcript, sessionId: st.sessionId, costUsd: st.costUsd || 0 };
 }
 
-module.exports = { agentRunEnv, opencodeDataHome, jsonFromText, conforms, failureKind, runAgent };
+module.exports = { agentRunEnv, opencodeDataHome, jsonFromText, conforms, failureKind, cliRunError, cliFailure, runAgent };

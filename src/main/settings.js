@@ -319,28 +319,27 @@ function clampInt(v, min, max, def) {
 
 // Seçili yönetici: anahtarı çözmeden yalnızca seçimi okur (tanınmayan değer varsayılana düşer).
 const managerBy = (s = load()) => (ENUMS.managerBy.includes(s.managerBy) ? s.managerBy : DEFAULTS.managerBy);
-// Günlükte ve arayüzde görünen ad.
-const managerLabel = (s = load()) => ({ anthropic: 'Claude API', local: 'Yerel model', nim: 'NVIDIA NIM', opencode: 'OpenCode' }[managerBy(s)] || 'Claude CLI');
 // CLI yöneticileri (Claude CLI, OpenCode) anahtar değil kurulu bir CLI ister (tembel require: agents → runner → env zinciri).
 const cliReady = (id, s) => !!require('./agents').resolveBin(id, s);
-// Yönetici kullanıma hazır mı: Claude CLI → Claude Code kurulu; OpenCode → OpenCode kurulu; Claude API → anahtar;
-// yerel / NIM → model seçilmiş (NIM'de anahtar da).
-const managerReady = (s = get()) => {
-  const by = managerBy(s);
-  if (by === 'anthropic') return !!s.anthropicKey;
-  if (by === 'local') return !!String(s.localModel || '').trim();
-  if (by === 'nim') return !!s.nimApiKey && !!String(s.nimModel || '').trim();
-  if (by === 'opencode') return cliReady('opencode', s);
-  return cliReady('claude', s);
+const chosen = (v) => !!String(v || '').trim();
+// Yönetici sağlayıcıları: arayüz / günlük adı, hazır olma koşulu ve eksikse kullanıcıya ileti. Yeni sağlayıcı = bir satır
+// (ENUMS.managerBy'a da eklenir).
+const MANAGERS = {
+  claudecli: { label: 'Claude CLI', ready: (s) => cliReady('claude', s), missing: () => 'Claude Code bulunamadı. Ayarlar → Bağlantılar\'dan "Claude\'u kur ve bağla" ile bağlayın.' },
+  anthropic: { label: 'Claude API', ready: (s) => !!s.anthropicKey, missing: () => 'Anthropic API anahtarı yok. Ayarlar\'dan ekleyin.' },
+  local: { label: 'Yerel model', ready: (s) => chosen(s.localModel), missing: () => 'Yerel model seçilmemiş. Ayarlar → Bağlantılar → Yerel model sunucusu\'ndan listeyi çekip Modeller → Yönetici\'den seçin.' },
+  nim: {
+    label: 'NVIDIA NIM',
+    ready: (s) => !!s.nimApiKey && chosen(s.nimModel),
+    missing: (s) => (!s.nimApiKey ? 'NVIDIA NIM API anahtarı yok. Ayarlar → Bağlantılar → NVIDIA NIM\'den ekleyin (build.nvidia.com).' : 'NVIDIA NIM modeli seçilmemiş. Ayarlar → Bağlantılar → NVIDIA NIM\'den "Modelleri getir" ile seçin.'),
+  },
+  opencode: { label: 'OpenCode', ready: (s) => cliReady('opencode', s), missing: () => 'OpenCode bulunamadı. Kurulum: npm install -g opencode-ai (Ayarlar → Bağlantılar → OpenCode).' },
 };
-const managerMissingMessage = (s = get()) => {
-  const by = managerBy(s);
-  if (by === 'anthropic') return 'Anthropic API anahtarı yok. Ayarlar\'dan ekleyin.';
-  if (by === 'local') return 'Yerel model seçilmemiş. Ayarlar → Bağlantılar → Yerel model sunucusu\'ndan listeyi çekip Modeller → Yönetici\'den seçin.';
-  if (by === 'nim') return !s.nimApiKey ? 'NVIDIA NIM API anahtarı yok. Ayarlar → Bağlantılar → NVIDIA NIM\'den ekleyin (build.nvidia.com).' : 'NVIDIA NIM modeli seçilmemiş. Ayarlar → Bağlantılar → NVIDIA NIM\'den "Modelleri getir" ile seçin.';
-  if (by === 'opencode') return 'OpenCode bulunamadı. Kurulum: npm install -g opencode-ai (Ayarlar → Bağlantılar → OpenCode).';
-  return 'Claude Code bulunamadı. Ayarlar → Bağlantılar\'dan "Claude\'u kur ve bağla" ile bağlayın.';
-};
+// Günlükte ve arayüzde görünen ad.
+const managerLabel = (s = load()) => MANAGERS[managerBy(s)].label;
+// Yönetici kullanıma hazır mı (CLI kurulu / anahtar var / model seçilmiş); değilse neden.
+const managerReady = (s = get()) => MANAGERS[managerBy(s)].ready(s);
+const managerMissingMessage = (s = get()) => MANAGERS[managerBy(s)].missing(s);
 // Claude CLI yöneticisinin modeli: ayarı boşsa Ajanlar'daki Claude modeli.
 const managerClaudeModelOf = (s = get()) => String(s.managerClaudeModel || '').trim() || claudeModelOf(s);
 

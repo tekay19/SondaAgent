@@ -12,14 +12,15 @@ const path = require('path');
 const core = require('./llmcore');
 const runner = require('./runner');
 const { resolveBin } = require('./agents/install');
-const { agentRunEnv, conforms, failureKind } = require('./agents/run');
-const { clip, parseResetAt } = require('./agents/adapters');
+const { agentRunEnv, conforms, cliRunError, cliFailure } = require('./agents/run');
 const { claudeModelOf } = require('./models');
 
 // Yönetici işleri için düşünme derinliği (Claude API istemcisiyle aynı varsayılan).
 const DEFAULT_EFFORT = 'medium';
 // Bir yönetici çağrısı için üst sınır: büyük bir şartname + plan 30 dakikayı aşmaz; aşarsa kopmuş bir oturumdur.
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
+// Claude CLI ilk olayı saniyeler içinde yazar; bu süre geçtiyse oturum takılmıştır.
+const FIRST_OUTPUT_MS = 3 * 60 * 1000;
 // Ekli dosyaları okuyan oturum için adım sınırı (ek başına bir okuma + yanıt).
 const MAX_TURNS_WITH_FILES = 24;
 
@@ -101,7 +102,7 @@ async function generate({ settings = {}, model, system, parts, schema, effort = 
           input: prompt,
           signal,
           timeoutMs,
-          firstOutputMs: 3 * 60 * 1000,
+          firstOutputMs: FIRST_OUTPUT_MS,
           tailSize: 20000,
           onStdout: (line) => {
             let ev;
@@ -137,22 +138,14 @@ async function generate({ settings = {}, model, system, parts, schema, effort = 
           },
         });
         if (signal?.aborted) throw new Error('İptal edildi');
-        if (r.error) throw new ClaudeCliError(`Claude Code başlatılamadı: ${r.error}`, 0);
-        if (r.noOutput) throw new ClaudeCliError('Claude CLI 3 dakika boyunca hiç çıktı vermedi (oturum takıldı)', 0, { timeout: true, network: true });
-        if (r.timedOut) throw new ClaudeCliError(`Claude CLI zaman aşımı (${Math.max(1, Math.round(timeoutMs / 60000))} dk)`, 0, { timeout: true, network: true });
+        const runErr = cliRunError(ClaudeCliError, 'Claude CLI', r, { firstOutputMs: FIRST_OUTPUT_MS, timeoutMs });
+        if (runErr) throw runErr;
         const u = st.usage || {};
         const inTok = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
         const outTok = u.output_tokens || 0;
         if (st.usage) onUsage?.({ totalTokenCount: inTok + outTok, inputTokens: inTok, outputTokens: outTok, costUsd: st.cost });
         const errText = st.errorText || (r.code !== 0 ? stderr.slice(-15).join('\n') : '');
-        if (st.isError || (r.code !== 0 && !st.gotResult)) {
-          const kind = failureKind(errText);
-          const msg = clip(errText || `çıkış kodu ${r.code}`, 600);
-          if (kind === 'limited') throw new ClaudeCliError(`Claude kullanım limiti: ${msg}`, 429, { limited: true, resetAt: parseResetAt(errText) });
-          if (kind === 'offline') throw new ClaudeCliError(`Claude bağlantı hatası: ${msg}`, 0, { network: true });
-          if (kind === 'auth') throw new ClaudeCliError(`Claude oturumu yok ya da süresi dolmuş: ${msg}. Ayarlar → Bağlantılar'dan giriş yapın.`, 401, { auth: true });
-          throw new ClaudeCliError(`Claude CLI hatası: ${msg}`, 0);
-        }
+        if (st.isError || (r.code !== 0 && !st.gotResult)) throw cliFailure(ClaudeCliError, 'Claude CLI', errText, r.code, { loginHint: 'Ayarlar → Bağlantılar\'dan giriş yapın.' });
         if (!st.gotResult) throw new ClaudeCliError('Claude CLI sonuç olayı göndermeden kapandı (yarım yanıt)', 0, { truncated: true });
         const textOut = st.result || st.texts.join('\n\n');
         if (!schema) {
