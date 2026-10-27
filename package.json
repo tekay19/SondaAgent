@@ -1,8 +1,8 @@
 {
   "name": "sonda-agent",
   "productName": "Sonda Agent",
-  "version": "1.5.1",
-  "description": "Gemini planlar ve denetler, Claude Code / Codex kodlar, Sonda Agent test eder.",
+  "version": "1.6.0",
+  "description": "Yönetici (Claude CLI / Claude API / yerel model / NIM / OpenCode) ürünü tanımlar ve onaylar, Claude Code / Codex / OpenCode kodlar ve inceler, Sonda Agent test eder.",
   "main": "src/main/main.js",
   "author": "Semih",
   "license": "MIT",
